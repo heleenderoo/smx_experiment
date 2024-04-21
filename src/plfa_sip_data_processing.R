@@ -29,7 +29,7 @@ stopifnot(require("tidyverse"),
 
 
 
-# Import data ----
+# 1. Import data ----
 
 ## Sample treatments ----
 treatments <-
@@ -584,7 +584,7 @@ atom_perc_gluc <-
 
 
 
-# Harmonise raw PLFA data ----
+# 2. Compile raw PLFA data ----
 
 plfa_df <- bind_rows(
   # Batch 1
@@ -707,7 +707,8 @@ plfa_df <- bind_rows(
 
 
 
-# Process PLFA data ----
+# 3. Validate and correct raw PLFA data ----
+# (using peak information, internal standards and blanks)
 
 ## Validate correct peak selection ----
 
@@ -1183,7 +1184,7 @@ plfa_df <- plfa_df %>%
 
 
 
-## Split "lumped PLFAs" into multiple records ----
+# 4. Split "lumped PLFAs" into multiple records ----
 
 # Some similar PLFAs give an overlapping peak (similar retention time),
 # based on which it is not possible to distinguish them.
@@ -1299,6 +1300,7 @@ plfa_split <- bind_rows(plfa_split,
 
 
 
+# 5. Calculate concentrations and partition sources ----
 
 ## Convert peak areas to mole-based concentration units ----
 
@@ -1528,7 +1530,11 @@ plfa_split <- plfa_split %>%
   left_join(plfa_molecular_data %>%
               select(plfa, group_tier1, group_tier2),
             by = "plfa") %>%
-  relocate(group_tier1, group_tier2, .after = plfa)
+  relocate(group_tier1, group_tier2, .after = plfa) %>%
+  mutate(group_tier1 = coalesce(group_tier1,
+                                "other"),
+         group_tier2 = coalesce(group_tier2,
+                                "other"))
 
 
 
@@ -1752,7 +1758,7 @@ write.table(plfa_split,
 
 
 
-## Summarise per sample x PLFA ----
+# 6. Summarise per sample x PLFA ----
 # (across two GC-IRMS analysis replicates)
 
 # Create function
@@ -1924,17 +1930,7 @@ numeric_grouping_columns <-
 plfa_summ <- plfa_split %>%
   # Convert grouping columns to characters
   mutate(across(all_of(numeric_grouping_columns), as.character)) %>%
-  group_by(sample,
-           soil,
-           glucose_g_c_per_kg,
-           smx_mg_per_kg,
-           log_smx,
-           batch,
-           treatment_per_soil,
-           treatment,
-           plfa,
-           group_tier1,
-           group_tier2) %>%
+  group_by(across(all_of(grouping_columns))) %>%
   summarise_per_group(variables_to_summarise = parameters) %>%
   mutate(across(all_of(numeric_grouping_columns), as.numeric)) %>%
   arrange(plfa,
@@ -1944,7 +1940,60 @@ plfa_summ <- plfa_split %>%
 
 
 write.table(plfa_summ,
-            file = "./data/final_data/plfa_per_sample_harmonised.csv",
+            file = "./data/final_data/plfa_per_sample_plfa.csv",
+            row.names = FALSE,
+            na = "",
+            sep = ";",
+            dec = ".")
+
+
+
+# 7. Summarise per sample x group ----
+# (group_tier1)
+
+parameters <- c("conc_relative",
+                "conc_nmol_per_g",
+                "atom_perc",
+                "frac_gluc",
+                "conc_rel_gluc",
+                "conc_rel_native",
+                "conc_native_perc_extra")
+
+# No more grouping by "plfa" or "group_tier2"
+
+grouping_columns <- c("sample",
+                      "soil",
+                      "glucose_g_c_per_kg",
+                      "smx_mg_per_kg",
+                      "log_smx",
+                      "batch",
+                      "treatment_per_soil",
+                      "treatment",
+                      "group_tier1")
+
+
+# Check which grouping columns are numeric
+
+numeric_grouping_columns <- plfa_split %>%
+  summarise(across(all_of(grouping_columns), is.numeric)) %>%
+  unlist()
+
+numeric_grouping_columns <-
+  names(numeric_grouping_columns)[numeric_grouping_columns]
+
+
+plfa_summ_sample_group <- plfa_split %>%
+  mutate(across(all_of(numeric_grouping_columns), as.character)) %>%
+  group_by(across(all_of(grouping_columns))) %>%
+  summarise_per_group(variables_to_summarise = parameters) %>%
+  mutate(across(all_of(numeric_grouping_columns), as.numeric)) %>%
+  arrange(group_tier1,
+          soil,
+          treatment)
+
+
+write.table(plfa_summ_sample_group,
+            file = "./data/final_data/plfa_per_sample_group.csv",
             row.names = FALSE,
             na = "",
             sep = ";",
@@ -1954,8 +2003,60 @@ write.table(plfa_summ,
 
 
 
+# 8. Summarise per soil treatment x group ----
+# (group_tier1)
 
-# Graphs ----
+parameters <- c("conc_relative",
+                "conc_nmol_per_g",
+                "atom_perc",
+                "frac_gluc",
+                "conc_rel_gluc",
+                "conc_rel_native",
+                "conc_native_perc_extra")
+
+# No more grouping by "plfa", "group_tier2", "sample", "batch"
+
+grouping_columns <- c("soil",
+                      "glucose_g_c_per_kg",
+                      "smx_mg_per_kg",
+                      "log_smx",
+                      "treatment_per_soil",
+                      "treatment",
+                      "group_tier1")
+
+
+# Check which grouping columns are numeric
+
+numeric_grouping_columns <- plfa_split %>%
+  summarise(across(all_of(grouping_columns), is.numeric)) %>%
+  unlist()
+
+numeric_grouping_columns <-
+  names(numeric_grouping_columns)[numeric_grouping_columns]
+
+
+plfa_summ_trt_group <- plfa_split %>%
+  mutate(across(all_of(numeric_grouping_columns), as.character)) %>%
+  group_by(across(all_of(grouping_columns))) %>%
+  summarise_per_group(variables_to_summarise = parameters) %>%
+  mutate(across(all_of(numeric_grouping_columns), as.numeric)) %>%
+  arrange(group_tier1,
+          treatment)
+
+
+write.table(plfa_summ_trt_group,
+            file = "./data/final_data/plfa_per_soil_trt_group.csv",
+            row.names = FALSE,
+            na = "",
+            sep = ";",
+            dec = ".")
+
+
+
+
+# 9. Statistics and visualisation ----
+
+
 
 ## Stacked columns absolute concentration (nmol g-1) (batch 3) ----
 # (different groups per column, including "non-marker PLFAs")
