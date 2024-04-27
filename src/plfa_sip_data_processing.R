@@ -137,8 +137,10 @@ blanks <- bind_rows(
   # Harmonise PLFAs
   mutate(plfa = str_replace_all(plfa, "\\s+", ""),
          plfa = case_when(
-           plfa == "i17_1w8+10Me16:0" ~ "i17:1w8+10Me16:0",
-           plfa == "16:2w6,9c" ~ "18:2w6c",
+           plfa == "i17_1w8+10Me16:0" ~ "i17:1w7c+10Me16:0",
+           plfa == "10Me18:0+12Me18:0" ~ "10&12Me18:0",
+           plfa == "18:1w7c/9t+8c" ~ "18:1w7&8c",
+           plfa == "16:2w6,9c" ~ "18:2w6,9c",
            .default = plfa)) %>%
   # Note that internal standards 13:0 (to all batches) and 19:0 (to batch 3)
   # have been added to the blanks too, so we should actually ignore those.
@@ -198,9 +200,10 @@ c_methyl_corr <- bind_rows(
     plfa = str_replace(plfa, "W", "a"),
     plfa = case_when(
       plfa == "16:1w7c+6c" ~ "16:1w7c+16:1w6c",
-      plfa == "16:2w6,9c" ~ "18:2w6c",
-      plfa == "i17_1w8+10Me16:0" ~ "i17:1w8+10Me16:0",
-      plfa == "18:1w7c/9t+8c" ~ "18:1w7c+18:1w9t+18:1w8c",
+      plfa == "16:2w6,9c" ~ "18:2w6,9c",
+      plfa == "i17_1w8+10Me16:0" ~ "i17:1w7c+10Me16:0",
+      plfa == "10Me18:0+12Me18:0" ~ "10&12Me18:0",
+      plfa == "18:1w7c/9t+8c" ~ "18:1w7&8c",
       plfa == "cy19:0+cy19:0" ~ "cy19:0",
       .default = plfa)) %>%
   group_by(plfa, c_atoms_fa) %>%
@@ -317,9 +320,10 @@ molecular_mass <- bind_rows(
     plfa = str_replace(plfa, "W", "a"),
     plfa = case_when(
       plfa == "16:1w7c+6c" ~ "16:1w7c+16:1w6c",
-      plfa == "16:2w6,9c" ~ "18:2w6c",
-      plfa == "i17_1w8+10Me16:0" ~ "i17:1w8+10Me16:0",
-      plfa == "18:1w7c/9t+8c" ~ "18:1w7c+18:1w9t+18:1w8c",
+      plfa == "16:2w6,9c" ~ "18:2w6,9c",
+      plfa == "i17_1w8+10Me16:0" ~ "i17:1w7c+10Me16:0",
+      plfa == "10Me18:0+12Me18:0" ~ "10&12Me18:0",
+      plfa == "18:1w7c/9t+8c" ~ "18:1w7&8c",
       plfa == "cy19:0+cy19:0" ~ "cy19:0",
       .default = plfa)) %>%
   distinct(plfa,
@@ -354,33 +358,22 @@ plfa_molecular_data <- data.frame(
            "cy17:0",
            "i16:0",
            "16:0",
-           # This should probably be:
-           # "i17:1w9c" or "i17:1w10c"
-           # (Norris et al., 2023)
-           "i17:1w8",
-           # Strange that "i17:1w8" and "10Me16:0" are
-           # lumped together in one peak because
-           # different masses
+           "i17:1w7c",
            "10Me16:0", # In same peak like previous
            "17:1w8c",
            "i17:0",
            "a17:0",
            "17:0",
-           # Probably linoleic acid (18:2w6c)
-           "18:2w6c",
+           "18:2w6,9c",
            "18:1w9c",
-           "18:1w7c",
-           # Not in Norris et al. (2023)!
-           "18:1w9t", # In same peak like previous
-           "18:1w8c", # In same peak like previous
-           # Probably lumped together from two omega positions
-           # (w9c, w7c or w6c?)
-           "cy19:0",
+           "18:1w7&8c",
+         #  "18:1w9t", # In same peak like previous
+         #  "18:1w8c", # In same peak like previous
+           "cy19:0", # Lumps together two omega positions
            "10Me17:0",
            "18:0",
-           "10Me18:0",
-           # Not in Norris et al. (2023)!
-           "12Me18:0", # In same peak like previous
+           "10&12Me18:0",
+          # "12Me18:0", # In same peak like previous
            "19:0"),
   # Retrieved using:
   # https://pubchem.ncbi.nlm.nih.gov/
@@ -389,26 +382,29 @@ plfa_molecular_data <- data.frame(
                            "C16H30O2", "C16H30O2", "C17H32O2", "C16H32O2",
                            "C16H32O2", "C17H32O2", "C17H34O2", "C17H32O2",
                            "C17H34O2", "C17H34O2", "C17H34O2", "C18H32O2",
-                           "C18H34O2", "C18H34O2", "C18H34O2", "C18H34O2",
+                           "C18H34O2", "C18H34O2", # "C18H34O2", "C18H34O2",
                            "C19H36O2", "C18H36O2", "C18H36O2", "C19H38O2",
-                           "C19H38O2", "C19H38O2"),
+                          # "C19H38O2",
+                           "C19H38O2"),
   # Based on Joergensen et al. (2021) and validated using other publications
   group_tier1 = c(NA, NA, "gram-positive", NA,
                   "gram-positive", "gram-positive", NA, "gram-negative",
                   NA, "fungi", "gram-negative", "gram-positive",
                   NA, NA, "gram-positive", "gram-negative",
                   "gram-positive", "gram-positive", NA, "fungi",
-                  "fungi", "gram-negative", NA, NA,
+                  "fungi", "gram-negative", # NA, NA,
                   "gram-negative", "gram-positive", NA, "gram-positive",
-                  NA, NA),
+                  # NA,
+                  NA),
   group_tier2 = c(NA, NA, "firmicutes", NA,
                   "firmicutes", "firmicutes", NA, NA,
                   NA, "amf", NA, "firmicutes",
                   NA, NA, "actinobacteria", NA,
                   "firmicutes", "firmicutes", NA, "asco- and basidiomycota",
-                  "zygomycota", NA, NA, NA,
+                  "zygomycota", NA, # NA, NA,
                   NA, "actinobacteria", NA, "actinobacteria",
-                  NA, NA)) %>%
+                 # NA,
+                  NA)) %>%
   mutate(group_tier2 = coalesce(group_tier2,
                                 group_tier1)) %>%
   # Extract numbers of C, H, and O atoms and calculate molecular mass
@@ -484,7 +480,7 @@ plfa_molecular_data <- plfa_molecular_data %>%
 # inconsistencies for:
 # · cy17:0
 # · cy19:0
-# · 10Me16:0 (lumped together with "i17:1w8" for which the info is correct)
+# · 10Me16:0 (lumped together with "i17:1w7c" for which the info is correct)
 
 assertthat::assert_that(
   all(!is.na(plfa_molecular_data$diff_molar_mass)) &&
@@ -653,7 +649,8 @@ plfa_df <- bind_rows(
   # Delta notation relative to Vienna Pee Dee Belemnite (VPDB)
   # of the measured fatty acid methyl ester (FAME)
   rename(d13c_permille = "d13C/d12C.permille") %>%
-  # 12:0 is less reliable (it often disappears) and is less interesting (?)
+  # 12:0 is less reliable
+  # (it often disappears so not constant during measurements)
   filter(plfa != "12") %>%
   # Remove data for 19:0 internal standard in batch 1 and 2 since not reliable
   # (added in methylised form)
@@ -662,17 +659,15 @@ plfa_df <- bind_rows(
   mutate(
     # Remove spaces
     plfa = str_replace_all(plfa, "\\s+", ""),
-    # Change "17" to "17:0"
-    plfa = ifelse(plfa == "17",
-                  "17:0",
-                  plfa),
     # Change "W" to "a" (typo for sample C2-2 in batch 2)
     plfa = str_replace(plfa, "W", "a"),
     plfa = case_when(
+      plfa == "17" ~ "17:0",
       plfa == "16:1w7c+6c" ~ "16:1w7c+16:1w6c",
-      plfa == "i17_1w8+10Me16:0" ~ "i17:1w8+10Me16:0",
-      plfa == "16:2w6,9c" ~ "18:2w6c",
-      plfa == "18:1w7c/9t+8c" ~ "18:1w7c+18:1w9t+18:1w8c",
+      plfa == "i17_1w8+10Me16:0" ~ "i17:1w7c+10Me16:0",
+      plfa == "16:2w6,9c" ~ "18:2w6,9c",
+      plfa == "10Me18:0+12Me18:0" ~ "10&12Me18:0",
+      plfa == "18:1w7c/9t+8c" ~ "18:1w7&8c",
       plfa == "cy19:0+cy19:0" ~ "cy19:0",
       .default = plfa)) %>%
   # Add treatment information
@@ -717,7 +712,7 @@ plfa_df <- bind_rows(
 
 # Create a list with the plausible start retention times per PLFA.
 # Median retention times per batch per PLFA seem quite stable (< 1-2 sec),
-# except for "cy19:0" and for "i17:1w8+10Me16:0" (batch 3) (~ 5 sec)
+# except for "cy19:0" and for "i17:1w7c+10Me16:0" (batch 3) (~ 5 sec)
 
 rt_plausible <-
   plfa_df %>%
@@ -740,14 +735,14 @@ rt_plausible <-
   # checking of the data)
   mutate(
     min_rt_plaus = case_when(
-      plfa %in% c("i17:1w8+10Me16:0") ~ median_rt - 10,
+      plfa %in% c("i17:1w7c+10Me16:0") ~ median_rt - 10,
       plfa %in% c("cy19:0") ~ median_rt - 8,
-      plfa %in% c("10Me18:0+12Me18:0") ~ median_rt - 5,
+      plfa %in% c("10&12Me18:0") ~ median_rt - 5,
       TRUE ~ median_rt - 2),
     max_rt_plaus = case_when(
-      plfa %in% c("i17:1w8+10Me16:0") ~ median_rt + 10,
+      plfa %in% c("i17:1w7c+10Me16:0") ~ median_rt + 10,
       plfa %in% c("cy19:0") ~ median_rt + 8,
-      plfa %in% c("10Me18:0+12Me18:0") ~ median_rt + 5,
+      plfa %in% c("10&12Me18:0") ~ median_rt + 5,
       TRUE ~ median_rt + 2)) %>%
   arrange(plfa)
 
@@ -1172,15 +1167,52 @@ plfa_df <- plfa_df %>%
               select(unique_plfa_batch, area) %>%
               rename(area_blank = area),
             by = "unique_plfa_batch") %>%
+  relocate(area_blank, .after = area) %>%
+  # Not sure about the reported blanks for most PLFAs in batch 1 and 2
+  # (probably copy-pasted and not updated)
+  # The "real area_blank" should range between 0 and what is reported for
+  # area_blank, i.e. on average 0.5 * area_blank seems the safest way forward
   mutate(
-    area = ifelse(
+    # Add minimum and maximum of uncertainty range
+    area_min = ifelse(
       !is.na(area_blank) &
         !is.na(area),
       ifelse(
         (area - area_blank) < 0,
         0,
         area - area_blank),
-      area))
+      area),
+    area_max = ifelse(
+      !is.na(area_blank) &
+        !is.na(area),
+      ifelse(
+        batch %in% c(1, 2) &
+          plfa != "a15:0",
+        area,
+        ifelse(
+          (area - area_blank) < 0,
+          0,
+          area - area_blank)),
+      area),
+    area = ifelse(
+      !is.na(area_blank) &
+        !is.na(area),
+      ifelse(
+        # Not sure about the reported blanks for most PLFAs in batch 1 and 2
+        # (probably copy-pasted and not updated)
+        batch %in% c(1, 2) &
+          plfa != "a15:0",
+        ifelse(
+          (area - 0.5 * area_blank) < 0,
+          0,
+          area - 0.5 * area_blank),
+        ifelse(
+          (area - area_blank) < 0,
+          0,
+          area - area_blank)),
+      area)) %>%
+  relocate(area_min, .after = area) %>%
+  relocate(area_max, .after = area)
 
 
 
@@ -1200,10 +1232,7 @@ plfa_split <- plfa_df %>%
   # Copy the column "plfa" into column "plfa_lumped".
   # Column "plfa_lumped" will contain the original (lumped) PLFAs
   # Column "plfa" will contain the split PLFAs (after the for loop below)
-  mutate(plfa_lumped = plfa) %>%
-  # Add minimum and maximum of uncertainty range
-  mutate(area_min = area,
-         area_max = area)
+  mutate(plfa_lumped = plfa)
 
 extra_rows <- NULL
 
@@ -1212,6 +1241,8 @@ for (i in seq_len(nrow(plfa_split))) {
   plfa_split_i <- unlist(strsplit(plfa_split$plfa[i], split = "[+]"))
 
   area_i <- plfa_split$area[i]
+  area_min_i <- plfa_split$area_min[i]
+  area_max_i <- plfa_split$area_max[i]
 
   extra_row_i <- NULL
   extra_row_i_2 <- NULL
@@ -1225,48 +1256,16 @@ for (i in seq_len(nrow(plfa_split))) {
 
     extra_row_i$plfa[1] <- plfa_split_i[2]
     extra_row_i$area[1] <- 0.5 * area_i
-    extra_row_i$area_min[1] <- 0.5 * 0.5 * area_i
-    extra_row_i$area_max[1] <- 1.5 * 0.5 * area_i
+    extra_row_i$area_min[1] <- 0.5 * 0.5 * area_min_i
+    extra_row_i$area_max[1] <- 1.5 * 0.5 * area_max_i
 
 
     # First option
 
     plfa_split$plfa[i] <- plfa_split_i[1]
     plfa_split$area[i] <- 0.5 * area_i
-    plfa_split$area_min[i] <- 0.5 * 0.5 * area_i
-    plfa_split$area_max[i] <- 1.5 * 0.5 * area_i
-
-  }
-
-  if (length(plfa_split_i) == 3) {
-
-    # Second option
-
-    extra_row_i_2 <- plfa_split[i, ]
-
-    extra_row_i_2$plfa[1] <- plfa_split_i[2]
-    extra_row_i_2$area[1] <- 1/3 * area_i
-    extra_row_i_2$area_min[1] <- 0.5 * 1/3 * area_i
-    extra_row_i_2$area_max[1] <- 1.5 * 1/3 * area_i
-
-    # Third option
-
-    extra_row_i_3 <- plfa_split[i, ]
-
-    extra_row_i_3$plfa[1] <- plfa_split_i[3]
-    extra_row_i_3$area[1] <- 1/3 * area_i
-    extra_row_i_3$area_min[1] <- 0.5 * 1/3 * area_i
-    extra_row_i_3$area_max[1] <- 1.5 * 1/3 * area_i
-
-    extra_row_i <- bind_rows(extra_row_i_2,
-                             extra_row_i_3)
-
-    # First option
-
-    plfa_split$plfa[i] <- plfa_split_i[1]
-    plfa_split$area[i] <- 1/3 * area_i
-    plfa_split$area_min[i] <- 0.5 * 1/3 * area_i
-    plfa_split$area_max[i] <- 1.5 * 1/3 * area_i
+    plfa_split$area_min[i] <- 0.5 * 0.5 * area_min_i
+    plfa_split$area_max[i] <- 1.5 * 0.5 * area_max_i
 
   }
 
@@ -1764,7 +1763,8 @@ write.table(plfa_split,
 # Create function
 
 summarise_per_group <- function(df,
-                                variables_to_summarise) {
+                                variables_to_summarise,
+                                mode = "mean") {
 
   # The dataframe should be grouped already
   assertthat::assert_that(is_grouped_df(df))
@@ -1799,70 +1799,129 @@ summarise_per_group <- function(df,
     if (var_min %in% names(df) &
         var_max %in% names(df)) {
 
-      df_summ_var <- df %>%
-        reframe(
-          !!var_stdev := {
-            var_values <- .data[[var]]
-            if (sum(!is.na(var_values)) > 1) {
-              sd(var_values, na.rm = TRUE)
-            } else {
+      # Mode: mean
+
+      if (mode == "mean") {
+
+        df_summ_var <- df %>%
+          reframe(
+            !!var_stdev := {
+              var_values <- .data[[var]]
+              if (sum(!is.na(var_values)) > 1) {
+                sd(var_values, na.rm = TRUE)
+              } else {
+                NA_real_
+              }
+            },
+            !!var_min := ifelse(
+              any(!is.na(.data[[var_min]])),
+              min(.data[[var_min]], na.rm = TRUE),
               NA_real_
-            }
-          },
-          !!var_min := ifelse(
-            any(!is.na(.data[[var_min]])),
-            min(.data[[var_min]], na.rm = TRUE),
-            NA_real_
-          ),
-          !!var_max := ifelse(
-            any(!is.na(.data[[var_max]])),
-            max(.data[[var_max]], na.rm = TRUE),
-            NA_real_
-          ),
-          !!var := ifelse(
-            any(!is.na(.data[[var]])),
-            mean(.data[[var]], na.rm = TRUE),
-            NA_real_
-          )) %>%
-        # We are not proceeding with this standard deviation, which only reflects
-        # the between-replicate variation (of the estimates), not the within-
-        # replicate variation.
-        # The uncertainty ranges provided for each estimate already encapsulate
-        # the variation. They already gives us an understanding of the range
-        # within which the true parameter value is likely to lie.
-        select(-{{var_stdev}}) %>%
-        relocate({{var}}, .before = {{var_min}})
+            ),
+            !!var_max := ifelse(
+              any(!is.na(.data[[var_max]])),
+              max(.data[[var_max]], na.rm = TRUE),
+              NA_real_
+            ),
+            !!var := ifelse(
+              any(!is.na(.data[[var]])),
+              mean(.data[[var]], na.rm = TRUE),
+              NA_real_
+            )) %>%
+          # We are not proceeding with this standard deviation, which only
+          # reflects the between-replicate variation (of the estimates),
+          # not the within-replicate variation.
+          # The uncertainty ranges provided for each estimate already
+          # encapsulate the variation. They already gives us an understanding
+          # of the range within which the true parameter value is likely
+          # to lie.
+          select(-{{var_stdev}}) %>%
+          relocate({{var}}, .before = {{var_min}})
+
+      }
+
+
+      # Mode: sum
+
+      if (mode == "sum") {
+
+        df_summ_var <- df %>%
+          reframe(
+            !!var_min := ifelse(
+              any(!is.na(.data[[var_min]])),
+              sum(.data[[var_min]], na.rm = TRUE),
+              NA_real_
+            ),
+            !!var_max := ifelse(
+              any(!is.na(.data[[var_max]])),
+              sum(.data[[var_max]], na.rm = TRUE),
+              NA_real_
+            ),
+            !!var := ifelse(
+              any(!is.na(.data[[var]])),
+              sum(.data[[var]], na.rm = TRUE),
+              NA_real_
+            )) %>%
+          relocate({{var}}, .before = {{var_min}})
+
+      }
+
 
     } else {
 
-      df_summ_var <- df %>%
-        reframe(
-          !!var_stdev := {
-            var_values <- .data[[var]]
-            if (sum(!is.na(var_values)) > 1) {
-              sd(var_values, na.rm = TRUE)
-            } else {
+      # Option 2: within-repetition variation is not indicated in
+      # the dataframe (i.e. there are no columns with names ending with
+      # "_min" and "_max")
+
+      # Mode: mean
+
+      if (mode == "mean") {
+
+        df_summ_var <- df %>%
+          reframe(
+            !!var_stdev := {
+              var_values <- .data[[var]]
+              if (sum(!is.na(var_values)) > 1) {
+                sd(var_values, na.rm = TRUE)
+              } else {
+                NA_real_
+              }
+            },
+            !!var := ifelse(
+              any(!is.na(.data[[var]])),
+              mean(.data[[var]], na.rm = TRUE),
               NA_real_
-            }
-          },
-          !!var := ifelse(
-            any(!is.na(.data[[var]])),
-            mean(.data[[var]], na.rm = TRUE),
-            NA_real_
-          )) %>%
-        mutate(
-          !!var_min := ifelse(
-            !is.na(.data[[var_stdev]]) & !is.na(.data[[var]]),
-            .data[[var]] - .data[[var_stdev]],
-            NA_real_),
-          !!var_max := ifelse(
-            !is.na(.data[[var_stdev]]) & !is.na(.data[[var]]),
-            .data[[var]] + .data[[var_stdev]],
-            NA_real_)) %>%
-        # We can proceed with minimum and maximum values of the uncertainty
-        # ranges, to be consistent across parameters
-        select(-{{var_stdev}}) %>%
-        relocate({{var}}, .before = {{var_min}})
+            )) %>%
+          mutate(
+            !!var_min := ifelse(
+              !is.na(.data[[var_stdev]]) & !is.na(.data[[var]]),
+              .data[[var]] - .data[[var_stdev]],
+              NA_real_),
+            !!var_max := ifelse(
+              !is.na(.data[[var_stdev]]) & !is.na(.data[[var]]),
+              .data[[var]] + .data[[var_stdev]],
+              NA_real_)) %>%
+          # We can proceed with minimum and maximum values of the uncertainty
+          # ranges, to be consistent across parameters
+          select(-{{var_stdev}}) %>%
+          relocate({{var}}, .before = {{var_min}})
+
+      }
+
+
+      # Mode: sum
+
+      if (mode == "sum") {
+
+        df_summ_var <- df %>%
+          reframe(
+            !!var := ifelse(
+              any(!is.na(.data[[var]])),
+              sum(.data[[var]], na.rm = TRUE),
+              NA_real_
+            ))
+
+      }
 
     }
 
@@ -1931,7 +1990,8 @@ plfa_summ <- plfa_split %>%
   # Convert grouping columns to characters
   mutate(across(all_of(numeric_grouping_columns), as.character)) %>%
   group_by(across(all_of(grouping_columns))) %>%
-  summarise_per_group(variables_to_summarise = parameters) %>%
+  summarise_per_group(variables_to_summarise = parameters,
+                      mode = "mean") %>%
   mutate(across(all_of(numeric_grouping_columns), as.numeric)) %>%
   arrange(plfa,
           soil,
@@ -1974,7 +2034,7 @@ grouping_columns <- c("sample",
 
 # Check which grouping columns are numeric
 
-numeric_grouping_columns <- plfa_split %>%
+numeric_grouping_columns <- plfa_summ %>%
   summarise(across(all_of(grouping_columns), is.numeric)) %>%
   unlist()
 
@@ -1982,10 +2042,11 @@ numeric_grouping_columns <-
   names(numeric_grouping_columns)[numeric_grouping_columns]
 
 
-plfa_summ_sample_group <- plfa_split %>%
+plfa_summ_sample_group <- plfa_summ %>%
   mutate(across(all_of(numeric_grouping_columns), as.character)) %>%
   group_by(across(all_of(grouping_columns))) %>%
-  summarise_per_group(variables_to_summarise = parameters) %>%
+  summarise_per_group(variables_to_summarise = parameters,
+                      mode = "sum") %>%
   mutate(across(all_of(numeric_grouping_columns), as.numeric)) %>%
   arrange(group_tier1,
           soil,
@@ -2027,7 +2088,7 @@ grouping_columns <- c("soil",
 
 # Check which grouping columns are numeric
 
-numeric_grouping_columns <- plfa_split %>%
+numeric_grouping_columns <- plfa_summ %>%
   summarise(across(all_of(grouping_columns), is.numeric)) %>%
   unlist()
 
@@ -2038,7 +2099,8 @@ numeric_grouping_columns <-
 plfa_summ_trt_group <- plfa_split %>%
   mutate(across(all_of(numeric_grouping_columns), as.character)) %>%
   group_by(across(all_of(grouping_columns))) %>%
-  summarise_per_group(variables_to_summarise = parameters) %>%
+  summarise_per_group(variables_to_summarise = parameters,
+                      mode = "sum") %>%
   mutate(across(all_of(numeric_grouping_columns), as.numeric)) %>%
   arrange(group_tier1,
           treatment)
@@ -2056,10 +2118,195 @@ write.table(plfa_summ_trt_group,
 
 # 9. Statistics and visualisation ----
 
-
-
 ## Stacked columns absolute concentration (nmol g-1) (batch 3) ----
 # (different groups per column, including "non-marker PLFAs")
+
+# Gap-fill NAs in order to reliably take sums per microbial group
+
+data_summ <- plfa_split %>%
+  filter(batch == 3) %>%
+  group_by(soil,
+           treatment,
+           plfa,
+           group_tier1) %>%
+  reframe(
+    conc_nmol_per_g = ifelse(
+      any(!is.na(conc_nmol_per_g)),
+      mean(conc_nmol_per_g, na.rm = TRUE),
+      NA_real_)) %>%
+  mutate(key = paste0(soil, "_", treatment, "_", plfa))
+
+# There are still some NAs for the following three PLFAs
+
+plfas_to_exclude <- data_summ %>%
+  filter(is.na(conc_nmol_per_g)) %>%
+  distinct(plfa) %>%
+  pull(plfa)
+
+# · 16:1w5c: about 3 mol% of the PLFAs on average
+# · i14:0: about 1 mol% of the PLFAs on average
+# · i16:0: about 4 mol% of the PLFAs on average
+
+# As such, it is not really possible to reliably to include those PLFAs in
+# the sum of the PLFAs per microbial group, since the concentrations of these
+# PLFAs are unknown within some of the treatments.
+# Therefore, it would unfortunately be the safest to exclude these PLFAs
+# from the sum
+
+data_graph <- plfa_split %>%
+  filter(batch == 3) %>%
+  # Exclude the PLFAs with NAs across replicates
+  filter(!plfa %in% plfas_to_exclude) %>%
+  mutate(key = paste0(soil, "_", treatment, "_", plfa)) %>%
+  left_join(data_summ %>%
+              rename(conc_avg = conc_nmol_per_g) %>%
+              select(key, conc_avg),
+            by = "key") %>%
+  select(-key) %>%
+  mutate(conc_nmol_per_g = coalesce(conc_nmol_per_g,
+                                    conc_avg))
+
+assertthat::assert_that(all(!is.na(data_graph$conc_nmol_per_g)))
+
+data_graph <- data_graph %>%
+  select(soil,
+         treatment,
+         replicate,
+         plfa,
+         group_tier1,
+         conc_nmol_per_g) %>%
+  group_by(soil, treatment, replicate, group_tier1) %>%
+  summarise_per_group(variables_to_summarise = c("conc_nmol_per_g"),
+                      mode = "sum") %>%
+  mutate(
+    treatment_num = case_when(
+      treatment == "C" ~ 1,
+      treatment == "0" ~ 2,
+      treatment == "4" ~ 3,
+      treatment == "6" ~ 4),
+    treatment_name = case_when(
+      treatment == "C" ~ "**0** gluc   · **0** SMX",
+      treatment == "0" ~ "**0.5** gluc · **0** SMX",
+      treatment == "4" ~ "**0.5** gluc · **4** SMX",
+      treatment == "6" ~ "**0.5** gluc · **6** SMX"),
+    group_name = str_to_sentence(group_tier1),
+    group_col = case_when(
+      group_tier1 == "other" ~ "#570000",
+      group_tier1 == "fungi" ~ "#0043b6",
+      group_tier1 == "gram-positive" ~ "#cd580f",
+      group_tier1 == "gram-negative" ~ "#e19f1c"),
+    soil_name = case_when(
+      soil == "Grabenegg" ~ "**Cambisol** (Grabenegg)",
+      soil == "Seibersdorf" ~ "**Chernozem** (Seibersdorf)")
+    ) %>%
+  mutate(group_name = factor(group_name,
+                              levels = c("Other",
+                                         "Fungi",
+                                         "Gram-positive",
+                                         "Gram-negative")))
+
+
+ p <- ggplot() +
+  geom_bar(data = data_graph %>%
+             filter(replicate == 1),
+           aes(x = treatment_num - 0.175,
+               y = conc_nmol_per_g,
+               fill = group_name),
+           stat = "identity",
+           position = "stack",
+           width = 0.3) +
+  geom_bar(data = data_graph %>%
+             filter(replicate == 2),
+           aes(x = treatment_num + 0.175,
+               y = conc_nmol_per_g,
+               fill = group_name),
+           stat = "identity",
+           position = "stack",
+           width = 0.3) +
+  scale_x_continuous(breaks = unique(data_graph$treatment_num),
+                     labels = unique(data_graph$treatment_name)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  scale_fill_manual(values = setNames(data_graph$group_col,
+                                      data_graph$group_name)) +
+  facet_wrap(~soil_name, ncol = 1) +
+  labs(x = NULL,
+       y = paste0("**Concentration of PLFAs** (by microbial group)<br>",
+                  "(nmol g<sup>-1</sup>)")) +
+  coord_flip() +
+  theme(axis.text.y = element_markdown(hjust = 0,
+                                       colour = "black",
+                                       size = 10,
+                                       margin = margin(r = 10)),
+        axis.ticks = element_blank(),
+        text = element_text(color = "black",
+                            size = 10),
+        axis.text.x = element_text(colour = "black",
+                                   size = 10,
+                                   margin = margin(b = 8,
+                                                   t = 6)),
+        axis.title.x = element_markdown(hjust = 0,
+                                        lineheight = 1.4,
+                                        colour = "black",
+                                        margin = margin(b = 8)),
+        panel.spacing = unit(1, "lines"),
+        panel.grid.major.y = element_blank(),
+        panel.grid.major.x = element_line(linewidth = 1),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.minor.x = element_line(linewidth = 1),
+        panel.background = element_rect(fill = "#D8E0E0"),
+        strip.background = element_blank(),
+        strip.text = element_markdown(hjust = 0,
+                                      colour = "black",
+                                      size = 10,
+                                      margin = margin(b = 8)),
+        legend.position = "bottom",
+        legend.title = element_blank(),
+        legend.key.size = unit(0.6, "line"),
+        legend.margin = margin(t = 0, r = 0, b = 0, l = 8),
+        legend.text = element_text(margin = margin(l = 5,
+                                                   r = 10),
+                                   size = 10,
+                                   vjust = 0.7),
+        plot.margin = margin(t = 0.5,
+                             r = 0.5,
+                             b = 0.5,
+                             l = 0.5,
+                             unit = "cm")) +
+  geom_segment(data = data.frame(soil_name = "**Cambisol** (Grabenegg)",
+                                 height = 390),
+               aes(y = height, yend = height),
+               x = 3.6, xend = 4.4,
+               color = "black", linewidth = 0.8,
+               lineend = "butt") +
+  geom_segment(data = data.frame(soil_name = "**Cambisol** (Grabenegg)",
+                                 height = 390),
+               aes(y = height + 1.5, yend = height - 10),
+               x = 3.6, xend = 3.6,
+               color = "black", linewidth = 0.8,
+               lineend = "butt") +
+  geom_segment(data = data.frame(soil_name = "**Cambisol** (Grabenegg)",
+                                 height = 390),
+               aes(y = height + 1.5, yend = height - 10),
+               x = 4.4, xend = 4.4,
+               color = "black", linewidth = 0.8,
+               lineend = "butt") +
+  geom_text(data = data.frame(soil_name = "**Cambisol** (Grabenegg)",
+                              label = "Replicate measurements"),
+            aes(y = 410, x = 4, label = label),
+            color = "black", size = 3.5, hjust = 0, vjust = 0.4) +
+   guides(fill = guide_legend(reverse = TRUE))
+
+ggsave(filename = "absolute_conc_by_group.png",
+       path = "./output/figures/",
+       plot = p,
+       dpi = 500,
+       width = 6.81)
+
+
+
+
+
+
 
 ## Ratio fungi to bacteria ----
 
