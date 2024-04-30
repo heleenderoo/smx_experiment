@@ -1896,11 +1896,17 @@ summarise_per_group <- function(df,
             !!var_min := ifelse(
               !is.na(.data[[var_stdev]]) & !is.na(.data[[var]]),
               .data[[var]] - .data[[var_stdev]],
-              NA_real_),
+              ifelse(
+                is.na(.data[[var_stdev]]) & !is.na(.data[[var]]),
+                .data[[var]],
+                NA_real_)),
             !!var_max := ifelse(
               !is.na(.data[[var_stdev]]) & !is.na(.data[[var]]),
               .data[[var]] + .data[[var_stdev]],
-              NA_real_)) %>%
+              ifelse(
+                is.na(.data[[var_stdev]]) & !is.na(.data[[var]]),
+                .data[[var]],
+                NA_real_))) %>%
           # We can proceed with minimum and maximum values of the uncertainty
           # ranges, to be consistent across parameters
           select(-{{var_stdev}}) %>%
@@ -2031,6 +2037,9 @@ grouping_columns <- c("sample",
                       "treatment",
                       "group_tier1")
 
+# Calculate an average per plfa x treatment in order to gap-fill plfa_summ
+# (since it is more correct to include an average value than 0 for the
+# sum per group)
 
 # Check which grouping columns are numeric
 
@@ -2042,7 +2051,47 @@ numeric_grouping_columns <-
   names(numeric_grouping_columns)[numeric_grouping_columns]
 
 
+plfa_sum_avg <- plfa_summ %>%
+  mutate(across(all_of(numeric_grouping_columns), as.character)) %>%
+  group_by(across(all_of(
+    c(grouping_columns[which(!grouping_columns %in%
+                               c("sample", "batch"))],
+      "plfa")))) %>%
+  summarise_per_group(variables_to_summarise = parameters,
+                      mode = "mean") %>%
+  mutate(across(all_of(
+    numeric_grouping_columns[which(numeric_grouping_columns != "batch")]),
+    as.numeric)) %>%
+  arrange(plfa,
+          soil,
+          treatment) %>%
+  mutate(key = paste0(treatment_per_soil, "_", plfa)) %>%
+  # Rename the columns before adding them to the data to group
+  mutate(across(all_of(parameters),
+                list(avg = ~ .x))) %>%
+  select(-all_of(parameters)) %>%
+  select(-all_of(
+    c(grouping_columns[which(!grouping_columns %in% c("sample", "batch"))],
+      "plfa"))) %>%
+  rename_with(~ paste0(., "_avg"), ends_with("_min")) %>%
+  rename_with(~ paste0(., "_avg"), ends_with("_max"))
+
+
+# Gap-fill
+
 plfa_summ_sample_group <- plfa_summ %>%
+  # Add columns with averages across replicate samples, to gap-fill with
+  mutate(key = paste0(treatment_per_soil, "_", plfa)) %>%
+  left_join(plfa_sum_avg,
+            by = "key") %>%
+  select(-key) %>%
+  # Combine the columns
+  mutate(across(contains(parameters) & !contains("_avg"),
+                ~ coalesce(.,
+                           get(paste0(cur_column(), "_avg"))))) %>%
+  # Remove the columns with averages
+  select(-ends_with("_avg")) %>%
+  # Group and take sum
   mutate(across(all_of(numeric_grouping_columns), as.character)) %>%
   group_by(across(all_of(grouping_columns))) %>%
   summarise_per_group(variables_to_summarise = parameters,
@@ -2064,59 +2113,59 @@ write.table(plfa_summ_sample_group,
 
 
 
-# 8. Summarise per soil treatment x group ----
-# (group_tier1)
-
-parameters <- c("conc_relative",
-                "conc_nmol_per_g",
-                "atom_perc",
-                "frac_gluc",
-                "conc_rel_gluc",
-                "conc_rel_native",
-                "conc_native_perc_extra")
-
-# No more grouping by "plfa", "group_tier2", "sample", "batch"
-
-grouping_columns <- c("soil",
-                      "glucose_g_c_per_kg",
-                      "smx_mg_per_kg",
-                      "log_smx",
-                      "treatment_per_soil",
-                      "treatment",
-                      "group_tier1")
-
-
-# Check which grouping columns are numeric
-
-numeric_grouping_columns <- plfa_summ %>%
-  summarise(across(all_of(grouping_columns), is.numeric)) %>%
-  unlist()
-
-numeric_grouping_columns <-
-  names(numeric_grouping_columns)[numeric_grouping_columns]
-
-
-plfa_summ_trt_group <- plfa_split %>%
-  mutate(across(all_of(numeric_grouping_columns), as.character)) %>%
-  group_by(across(all_of(grouping_columns))) %>%
-  summarise_per_group(variables_to_summarise = parameters,
-                      mode = "sum") %>%
-  mutate(across(all_of(numeric_grouping_columns), as.numeric)) %>%
-  arrange(group_tier1,
-          treatment)
-
-
-write.table(plfa_summ_trt_group,
-            file = "./data/final_data/plfa_per_soil_trt_group.csv",
-            row.names = FALSE,
-            na = "",
-            sep = ";",
-            dec = ".")
-
-
+# # 8. Summarise per soil treatment x group
+# # (group_tier1)
+#
+# parameters <- c("conc_relative",
+#                 "conc_nmol_per_g",
+#                 "atom_perc",
+#                 "frac_gluc",
+#                 "conc_rel_gluc",
+#                 "conc_rel_native",
+#                 "conc_native_perc_extra")
+#
+# # No more grouping by "plfa", "group_tier2", "sample", "batch"
+#
+# grouping_columns <- c("soil",
+#                       "glucose_g_c_per_kg",
+#                       "smx_mg_per_kg",
+#                       "log_smx",
+#                       "treatment_per_soil",
+#                       "treatment",
+#                       "group_tier1")
+#
+#
+# # Check which grouping columns are numeric
+#
+# numeric_grouping_columns <- plfa_summ %>%
+#   summarise(across(all_of(grouping_columns), is.numeric)) %>%
+#   unlist()
+#
+# numeric_grouping_columns <-
+#   names(numeric_grouping_columns)[numeric_grouping_columns]
+#
+#
+# plfa_summ_trt_group <- plfa_split %>%
+#   mutate(across(all_of(numeric_grouping_columns), as.character)) %>%
+#   group_by(across(all_of(grouping_columns))) %>%
+#   summarise_per_group(variables_to_summarise = parameters,
+#                       mode = "sum") %>%
+#   mutate(across(all_of(numeric_grouping_columns), as.numeric)) %>%
+#   arrange(group_tier1,
+#           treatment)
+#
+#
+# write.table(plfa_summ_trt_group,
+#             file = "./data/final_data/plfa_per_soil_trt_group.csv",
+#             row.names = FALSE,
+#             na = "",
+#             sep = ";",
+#             dec = ".")
 
 
-# 9. Statistics and visualisation ----
+
+
+# 8. Statistics and visualisation ----
 
 ## Stacked columns absolute concentration (nmol g-1) (batch 3) ----
 # (different groups per column, including "non-marker PLFAs")
@@ -2185,10 +2234,10 @@ data_graph <- data_graph %>%
       treatment == "4" ~ 3,
       treatment == "6" ~ 4),
     treatment_name = case_when(
-      treatment == "C" ~ "**0** gluc   · **0** SMX",
-      treatment == "0" ~ "**0.5** gluc · **0** SMX",
-      treatment == "4" ~ "**0.5** gluc · **4** SMX",
-      treatment == "6" ~ "**0.5** gluc · **6** SMX"),
+      treatment == "C" ~ "**0** glucose   · **0** SMX",
+      treatment == "0" ~ "**0.5** glucose · **0** SMX",
+      treatment == "4" ~ "**0.5** glucose · **1** SMX",
+      treatment == "6" ~ "**0.5** glucose · **100** SMX"),
     group_name = str_to_sentence(group_tier1),
     group_col = case_when(
       group_tier1 == "other" ~ "#570000",
@@ -2244,7 +2293,7 @@ data_graph <- data_graph %>%
                                    size = 10,
                                    margin = margin(b = 8,
                                                    t = 6)),
-        axis.title.x = element_markdown(hjust = 0,
+        axis.title.x = element_markdown(hjust = 1,
                                         lineheight = 1.4,
                                         colour = "black",
                                         margin = margin(b = 8)),
@@ -2262,11 +2311,13 @@ data_graph <- data_graph %>%
         legend.position = "bottom",
         legend.title = element_blank(),
         legend.key.size = unit(0.6, "line"),
+        legend.key = element_rect(fill = NA),
         legend.margin = margin(t = 0, r = 0, b = 0, l = 8),
         legend.text = element_text(margin = margin(l = 5,
                                                    r = 10),
                                    size = 10,
                                    vjust = 0.7),
+       # aspect.ratio = 0.5,
         plot.margin = margin(t = 0.5,
                              r = 0.5,
                              b = 0.5,
@@ -2300,6 +2351,7 @@ ggsave(filename = "absolute_conc_by_group.png",
        path = "./output/figures/",
        plot = p,
        dpi = 500,
+       height = 5,
        width = 6.81)
 
 
@@ -2309,6 +2361,138 @@ ggsave(filename = "absolute_conc_by_group.png",
 
 
 ## Ratio fungi to bacteria ----
+
+data_graph <- plfa_summ_sample_group %>%
+  select(soil,
+         treatment,
+         batch,
+         group_tier1,
+         conc_relative,
+         conc_relative_min,
+         conc_relative_max) %>%
+  filter(group_tier1 %in% c("gram-negative",
+                            "gram-positive",
+                            "fungi")) %>%
+  mutate(group = case_when(
+    group_tier1 %in% c("gram-negative", "gram-positive") ~ "bacteria",
+    group_tier1 %in% c("fungi") ~ "fungi")) %>%
+  select(-group_tier1) %>%
+  mutate(across(all_of(c("batch")), as.character)) %>%
+  group_by(across(all_of(c("soil",
+                           "treatment",
+                           "batch",
+                           "group")))) %>%
+  summarise_per_group(variables_to_summarise = c("conc_relative"),
+                      mode = "sum") %>%
+  mutate(across(all_of(c("batch")), as.numeric)) %>%
+  arrange(group,
+          soil,
+          treatment) %>%
+  # Split into columns for both "bacteria" and "fungi"
+  pivot_wider(
+    names_from = group,
+    values_from = c(conc_relative, conc_relative_min, conc_relative_max),
+    names_sep = "_") %>%
+  # Calculate fungi-to-bacteria ratio
+  mutate(f_to_b = conc_relative_fungi / conc_relative_bacteria,
+         f_to_b_min = conc_relative_min_fungi / conc_relative_max_bacteria,
+         f_to_b_max = conc_relative_max_fungi / conc_relative_min_bacteria) %>%
+  select(-contains("_bacteria"),
+         -contains("_fungi")) %>%
+  mutate(
+    treatment_num = case_when(
+      treatment == "C" ~ 1,
+      treatment == "0" ~ 2,
+      treatment == "4" ~ 3,
+      treatment == "6" ~ 4),
+    treatment_name = case_when(
+      treatment == "C" ~ "**0** glucose   · **0** SMX",
+      treatment == "0" ~ "**0.5** glucose · **0** SMX",
+      treatment == "4" ~ "**0.5** glucose · **1** SMX",
+      treatment == "6" ~ "**0.5** glucose · **100** SMX"),
+    soil_name = case_when(
+      soil == "Grabenegg" ~ "**Cambisol** (Grabenegg)",
+      soil == "Seibersdorf" ~ "**Chernozem** (Seibersdorf)")) %>%
+  arrange(soil,
+          treatment_num)
+
+
+
+p <- ggplot(data = data_graph,
+       aes(x = treatment_num,
+           y = f_to_b)) +
+  geom_point(col = "darkorange",
+             fill = "darkorange",
+             alpha = 0.5,
+             size = 3,
+             stroke = 1) +
+  scale_x_continuous(breaks = unique(data_graph$treatment_num),
+                     labels = unique(data_graph$treatment_name),
+                     expand = c(0.1, 0.1)) +
+  scale_y_continuous(limits = c(0.18, 0.30),
+                     breaks = seq(0.18, 0.30, by = 0.02),
+                     expand = c(0, 0)) +
+  facet_wrap(~soil_name, ncol = 1) +
+  labs(x = NULL,
+       y = paste0("**Fungi-to-bacteria** ratio")) +
+  coord_flip() +
+  theme(axis.text.y = element_markdown(hjust = 0,
+                                       colour = "black",
+                                       size = 10,
+                                       margin = margin(r = 10)),
+        axis.ticks = element_blank(),
+        text = element_text(color = "black",
+                            size = 10),
+        axis.text.x = element_text(colour = "black",
+                                   size = 10,
+                                   margin = margin(b = 8,
+                                                   t = 6)),
+        axis.title.x = element_markdown(hjust = 1,
+                                        lineheight = 1.4,
+                                        colour = "black",
+                                        margin = margin(b = 8)),
+        panel.spacing = unit(1, "lines"),
+        panel.grid.major.y = element_blank(),
+        panel.grid.major.x = element_line(linewidth = 1),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.minor.x = element_line(linewidth = 1),
+        panel.background = element_rect(fill = "#D8E0E0"),
+        strip.background = element_blank(),
+        strip.text = element_markdown(hjust = 0,
+                                      colour = "black",
+                                      size = 10,
+                                      margin = margin(b = 8)),
+        legend.position = "bottom",
+        legend.title = element_blank(),
+        legend.key.size = unit(0.6, "line"),
+        legend.key = element_rect(fill = NA),
+        legend.margin = margin(t = 0, r = 0, b = 0, l = 8),
+        legend.text = element_text(margin = margin(l = 5,
+                                                   r = 10),
+                                   size = 10,
+                                   vjust = 0.7),
+        # aspect.ratio = 0.5,
+        plot.margin = margin(t = 0.5,
+                             r = 0.5,
+                             b = 0.5,
+                             l = 0.5,
+                             unit = "cm"))
+
+
+
+ggsave(filename = "fungi_to_bacteria_ratio.png",
+       path = "./output/figures/",
+       plot = p,
+       dpi = 500,
+       height = 5,
+       width = 6.81)
+
+
+
+
+
+
+
 
 ## Ratio stress ----
 
