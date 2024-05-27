@@ -2115,6 +2115,17 @@ write.table(plfa_summ_gapfilled,
             dec = ".")
 
 
+# Sum per group
+
+parameters <- c("conc_relative",
+                "conc_nmol_per_g",
+                # "atom_perc",
+                # "frac_gluc",
+                "conc_rel_gluc",
+                "conc_rel_native"
+                # "conc_native_perc_extra"
+)
+
 plfa_summ_sample_group <- plfa_summ_gapfilled %>%
   # Group and take sum
   mutate(across(all_of(numeric_grouping_columns), as.character)) %>%
@@ -2151,6 +2162,104 @@ assertthat::assert_that(
 assertthat::assert_that(
   all(!is.na(plfa_summ_sample_group$conc_native_perc_extra[
     which(plfa_summ_sample_group$glucose_g_c_per_kg > 0)])))
+
+# Add an index representing the percentage extra PLFAs coming from native soil
+# organic carbon (as compared to unamended controls), to see to which extent
+# the incorporation of native soil organic carbon-derived C in which are
+# biomarkers for specific microbial groups is stimulated after the addition of
+# glucose
+# (i.e. % extra PLFAs from a certain group coming from native soil organic
+# carbon)
+
+# First, create a dataframe with the concentrations of PLFAs in unamended
+# soil samples:
+
+conc_group_native <- plfa_summ_sample_group %>%
+  filter(glucose_g_c_per_kg == 0 &
+           smx_mg_per_kg == 0) %>%
+  group_by(sample, soil, group_tier1) %>%
+  reframe(
+    conc_relative_min = ifelse(
+      any(!is.na(conc_relative_min)),
+      min(conc_relative_min, na.rm = TRUE),
+      NA_real_),
+    conc_relative_max = ifelse(
+      any(!is.na(conc_relative_max)),
+      max(conc_relative_max, na.rm = TRUE),
+      NA_real_),
+    conc_relative = ifelse(
+      any(!is.na(conc_relative)),
+      mean(conc_relative, na.rm = TRUE),
+      NA_real_)) %>%
+  ungroup() %>%
+  group_by(soil, group_tier1) %>%
+  reframe(conc_rel_control_min = min(conc_relative_min, na.rm = TRUE),
+          conc_rel_control_max = max(conc_relative_max, na.rm = TRUE),
+          conc_rel_control = mean(conc_relative, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(key = paste0(soil, "_", group_tier1))
+
+
+plfa_summ_sample_group <- plfa_summ_sample_group %>%
+  # Add concentration PLFAs of unamended treatments
+  mutate(key = paste0(soil, "_", group_tier1)) %>%
+  left_join(conc_group_native %>%
+              select(-soil, -group_tier1),
+            by = "key") %>%
+  select(-key) %>%
+  mutate(
+    conc_native_perc_extra_min = ifelse(
+      glucose_g_c_per_kg > 0,
+      # Use "conc_rel_control" rather than "conc_rel_control_max"
+      # to be consistent with calculations per plfa
+      (conc_rel_native_min / conc_rel_control - 1) * 100,
+      NA_real_),
+    conc_native_perc_extra_max = ifelse(
+      glucose_g_c_per_kg > 0,
+      # Use "conc_rel_control" rather than "conc_rel_control_max"
+      # to be consistent with calculations per plfa
+      (conc_rel_native_max / conc_rel_control - 1) * 100,
+      NA_real_),
+    conc_native_perc_extra = ifelse(
+      glucose_g_c_per_kg > 0,
+      (conc_rel_native / conc_rel_control - 1) * 100,
+      NA_real_))
+
+
+# Add atom %
+# First, derive the atom % per group for controls without glucose
+
+atom_perc_group <- plfa_summ_gapfilled %>%
+  filter(!plfa %in% c("13:0", "19:0")) %>%
+  group_by(sample, group_tier1) %>%
+  reframe(
+    atom_perc_min = ifelse(
+      any(!is.na(atom_perc)),
+      min(atom_perc_min, na.rm = TRUE),
+      NA_real_),
+    atom_perc_max = ifelse(
+      any(!is.na(atom_perc)),
+      max(atom_perc_max, na.rm = TRUE),
+      NA_real_),
+    atom_perc = ifelse(
+      any(!is.na(atom_perc)),
+      weighted.mean(atom_perc,
+                    w = conc_relative[which(!is.na(atom_perc))],
+                    na.rm = TRUE),
+      NA_real_)) %>%
+  ungroup() %>%
+  mutate(key = paste0(sample, "_", group_tier1))
+
+assertthat::assert_that(
+  nrow(atom_perc_group) == nrow(plfa_summ_sample_group))
+
+plfa_summ_sample_group <- plfa_summ_sample_group %>%
+  mutate(key = paste0(sample, "_", group_tier1)) %>%
+  left_join(atom_perc_group %>%
+              select(-sample, -group_tier1),
+            by = "key") %>%
+  select(-key)
+
 
 
 write.table(plfa_summ_sample_group,
@@ -2423,7 +2532,9 @@ data_graph <- plfa_summ_sample_group %>%
   # Values for samples without glucose
   filter(!is.na(conc_rel)) %>%
   # Reverse order of microbial groups for graph
-  mutate(group_name = factor(group_name, levels = rev(levels(group_name))))
+  mutate(group_name = factor(group_name,
+                             levels = rev(levels(group_name)))) # %>%
+  # filter(group_tier1 != "other")
 
 
 p <- ggplot() +
@@ -2784,6 +2895,706 @@ ggsave(filename = "fungi_to_bacteria_ratio.png",
        dpi = 500,
        height = 5,
        width = 6.81)
+
+
+## Within fungi and bacteria: rel. sources ----
+
+
+data_graph <- plfa_summ_sample_group %>%
+  select(soil,
+         treatment,
+         batch,
+         group_tier1,
+         conc_rel_native,
+         conc_rel_gluc) %>%
+  pivot_longer(cols = starts_with("conc_rel"),
+               names_to = "source",
+               names_prefix = "conc_rel_",
+               values_to = "conc_relative") %>%
+  filter(group_tier1 %in% c("gram-negative",
+                            "gram-positive",
+                            "fungi")) %>%
+  mutate(group = case_when(
+    group_tier1 %in% c("gram-negative", "gram-positive") ~ "bacteria",
+    group_tier1 %in% c("fungi") ~ "fungi")) %>%
+  select(-group_tier1) %>%
+  mutate(across(all_of(c("batch")), as.character)) %>%
+  group_by(across(all_of(c("soil",
+                           "treatment",
+                           "batch",
+                           "group",
+                           "source")))) %>%
+  summarise_per_group(variables_to_summarise = c("conc_relative"),
+                      mode = "sum") %>%
+  mutate(across(all_of(c("batch")), as.numeric)) %>%
+  arrange(group,
+          soil,
+          treatment) %>%
+  mutate(
+    treatment_num = case_when(
+      treatment == "C" ~ 1,
+      treatment == "0" ~ 2,
+      treatment == "4" ~ 3,
+      treatment == "6" ~ 4),
+    treatment_name = case_when(
+      treatment == "C" ~ "**0** glucose   · **0** SMX",
+      treatment == "0" ~ "**0.5** glucose · **0** SMX",
+      treatment == "4" ~ "**0.5** glucose · **1** SMX",
+      treatment == "6" ~ "**0.5** glucose · **100** SMX"),
+    group_name = str_to_sentence(group),
+    group_col = case_when(
+      group == "fungi" ~ "#0043b6",
+      group == "bacteria" ~ "#D77C16"),
+    soil_name = case_when(
+      soil == "Grabenegg" ~ "**Cambisol** (Grabenegg)",
+      soil == "Seibersdorf" ~ "**Chernozem** (Seibersdorf)"),
+    source = case_when(
+      source == "native" ~ "Native C",
+      source == "gluc" ~ "Glucose-C")) %>%
+  mutate(group_name = factor(group_name,
+                             levels = c("Bacteria",
+                                        "Fungi"))) %>%
+  # Values for samples without glucose
+  filter(!is.na(conc_relative))
+
+
+p <- ggplot() +
+  # Batch 1
+  geom_bar(data = data_graph %>%
+             filter(batch == 1),
+           aes(x = treatment_num - 0.22,
+               y = conc_relative,
+               fill = group_name),
+           stat = "identity",
+           position = "stack",
+           width = 0.2) +
+  geom_rect(data = data_graph %>%
+              filter(batch == 1) %>%
+              filter(treatment != "C") %>%
+              group_by(soil, treatment, batch, group,
+                       treatment_num, treatment_name, group_name,
+                       group_col, soil_name) %>%
+              reframe(conc_rel_native =
+                        conc_relative[which(source == "Native C")],
+                      conc_rel_tot = sum(conc_relative)),
+            aes(xmin = treatment_num - 0.22 - 0.1,
+                xmax = treatment_num - 0.22 + 0.1,
+                ymin = conc_rel_native,
+                ymax = conc_rel_tot),
+            fill = NA,
+            linewidth = 0.7,
+            color = "black") +
+  # Batch 2
+  geom_bar(data = data_graph %>%
+             filter(batch == 2),
+           aes(x = treatment_num,
+               y = conc_relative,
+               fill = group_name),
+           stat = "identity",
+           position = "stack",
+           width = 0.2) +
+  geom_rect(data = data_graph %>%
+              filter(batch == 2) %>%
+              filter(treatment != "C") %>%
+              group_by(soil, treatment, batch, group,
+                       treatment_num, treatment_name, group_name,
+                       group_col, soil_name) %>%
+              reframe(conc_rel_native =
+                        conc_relative[which(source == "Native C")],
+                      conc_rel_tot = sum(conc_relative)),
+            aes(xmin = treatment_num - 0.1,
+                xmax = treatment_num + 0.1,
+                ymin = conc_rel_native,
+                ymax = conc_rel_tot),
+            fill = NA,
+            linewidth = 0.7,
+            color = "black") +
+  # Batch 3
+  geom_bar(data = data_graph %>%
+             filter(batch == 3),
+           aes(x = treatment_num + 0.22,
+               y = conc_relative,
+               fill = group_name),
+           stat = "identity",
+           position = "stack",
+           width = 0.2) +
+  geom_rect(data = data_graph %>%
+              filter(batch == 3) %>%
+              filter(treatment != "C") %>%
+              group_by(soil, treatment, batch, group,
+                       treatment_num, treatment_name, group_name,
+                       group_col, soil_name) %>%
+              reframe(conc_rel_native =
+                        conc_relative[which(source == "Native C")],
+                      conc_rel_tot = sum(conc_relative)),
+            aes(xmin = treatment_num + 0.22 - 0.1,
+                xmax = treatment_num + 0.22 + 0.1,
+                ymin = conc_rel_native,
+                ymax = conc_rel_tot),
+            fill = NA,
+            linewidth = 0.7,
+            color = "black") +
+  scale_x_continuous(breaks = unique(data_graph$treatment_num),
+                     labels = unique(data_graph$treatment_name)) +
+  scale_y_continuous(expand = expansion(add = c(0, 0.5))) + #c(0, 0)) +
+  scale_fill_manual(values = setNames(data_graph$group_col,
+                                      data_graph$group_name),
+                    guide = "none") +
+  labs(x = NULL,
+       tag = paste0("g **glucose**-C kg<sup>-1</sup><br>",
+                    "mg **SMX** kg<sup>-1</sup>"),
+       y = paste0("**Relative concentration of PLFAs** (mol%)<br>",
+                  "(by microbial group and carbon source)")) +
+  facet_grid(soil_name ~ group_name) +
+  coord_flip() +
+  theme(axis.text.y = element_markdown(hjust = 0,
+                                       colour = "black",
+                                       size = 10,
+                                       margin = margin(r = 7)),
+        axis.ticks = element_blank(),
+        text = element_text(color = "black",
+                            size = 10),
+        axis.text.x = element_text(colour = "black",
+                                   size = 10,
+                                   margin = margin(b = 8,
+                                                   t = 6)),
+        axis.title.x = element_markdown(hjust = 1,
+                                        lineheight = 1.4,
+                                        colour = "black",
+                                        margin = margin(b = 0)),
+        plot.tag.position = c(0, 0.03),
+        plot.tag = element_markdown(hjust = 0,
+                                    lineheight = 1.4,
+                                    colour = "black",
+                                    size = 10,
+                                    margin = margin(b = 8)),
+        panel.spacing = unit(1, "lines"),
+        panel.grid.major.y = element_blank(),
+        panel.grid.major.x = element_line(linewidth = 1),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        # panel.grid.minor.x = element_line(linewidth = 1),
+        panel.background = element_rect(fill = "#D8E0E0"),
+        strip.background = element_blank(),
+        strip.text.x = element_markdown(hjust = 0,
+                                        colour = "black",
+                                        size = 10,
+                                        margin = margin(b = 8)),
+        strip.text.y = element_markdown(hjust = 0,
+                                        vjust = 1,
+                                        lineheight = 1.4,
+                                        colour = "black",
+                                        size = 10,
+                                        margin = margin(l = 10)),
+        plot.margin = margin(t = 0.5,
+                             r = 0.5,
+                             b = 0.5,
+                             l = 0.5,
+                             unit = "cm")) +
+  # True replicates
+  geom_segment(data = data.frame(soil_name = "**Chernozem** (Seibersdorf)",
+                                 group_name = as.factor("Fungi"),
+                                 height = 20),
+               aes(y = height, yend = height),
+               x = 3.55, xend = 4.45,
+               color = "black", linewidth = 0.7,
+               lineend = "butt") +
+  geom_segment(data = data.frame(soil_name = "**Chernozem** (Seibersdorf)",
+                                 group_name = as.factor("Fungi"),
+                                 height = 20),
+               aes(y = height + 0.2, yend = height - 2.5),
+               x = 3.55, xend = 3.55,
+               color = "black", linewidth = 0.7,
+               lineend = "butt") +
+  geom_segment(data = data.frame(soil_name = "**Chernozem** (Seibersdorf)",
+                                 group_name = as.factor("Fungi"),
+                                 height = 20),
+               aes(y = height + 0.2, yend = height - 2.5),
+               x = 4.45, xend = 4.45,
+               color = "black", linewidth = 0.7,
+               lineend = "butt") +
+  geom_richtext(data = data.frame(soil_name = "**Chernozem** (Seibersdorf)",
+                                  group_name = as.factor("Fungi"),
+                                  label =
+                                    "True<br>replicates"),
+                aes(y = 22, x = 4, label = label),
+                angle = 0,
+                fill = NA, label.color = NA, size = 3,
+                color = "black", hjust = 0, vjust = 0.55) +
+  # PLFAs derived from glucose
+  geom_richtext(data = data.frame(soil_name = "**Cambisol** (Grabenegg)",
+                                  group_name = as.factor("Fungi"),
+                                  label =
+                                    "PLFAs<br>from<br>**glucose**"),
+                aes(y = 17, x = 3.2, label = label),
+                angle = 0,
+                fill = NA, label.color = NA, label.size = 0.7,
+                size = 3,
+                color = "black", hjust = 0, vjust = 0.7) +
+  geom_rect(data = data.frame(soil_name = "**Cambisol** (Grabenegg)",
+                              group_name = as.factor("Fungi")),
+            aes(xmin = 2.35,
+                xmax = 3.6,
+                ymin = 15.5,
+                ymax = 35),
+            fill = NA,
+            linewidth = 0.7,
+            color = "black") +
+  geom_curve(
+    data = data.frame(soil_name = "**Cambisol** (Grabenegg)",
+                      group_name = as.factor("Fungi")),
+    aes(x = 4.2, y = 14, xend = 3.8, yend = 24),
+    stat = "unique", curvature = -0.5, linewidth = 0.7,
+    arrow = arrow(angle = 20, length = unit(1, "mm"))) +
+  # PLFAs derived from SOC
+  geom_richtext(data = data.frame(soil_name = "**Cambisol** (Grabenegg)",
+                                  group_name = as.factor("Fungi"),
+                                  label =
+                                    "PLFAs<br>from<br>**SOC**"),
+                aes(y = 17, x = 1.5, label = label),
+                angle = 0,
+                fill = NA, label.color = NA, label.size = 0.6,
+                size = 3,
+                color = "black", hjust = 0, vjust = 0.5) +
+  geom_curve(
+    data = data.frame(soil_name = "**Cambisol** (Grabenegg)",
+                      group_name = as.factor("Fungi")),
+    aes(x = 1.7, y = 5, xend = 1.5, yend = 14),
+    stat = "unique", curvature = 0.4, linewidth = 0.7,
+    arrow = arrow(angle = 20, length = unit(1, "mm")))
+
+
+ggsave(filename = "contrib_gluc_by_group_bact_fungi.png",
+       path = "./output/figures/",
+       plot = p,
+       dpi = 500,
+       height = 5,
+       width = 6.81)
+
+
+
+
+## Within fungi and bacteria: Absolute conc ----
+
+data_summ <- plfa_split %>%
+  filter(batch == 3) %>%
+  group_by(soil,
+           treatment,
+           plfa,
+           group_tier1) %>%
+  reframe(
+    conc_nmol_per_g = ifelse(
+      any(!is.na(conc_nmol_per_g)),
+      mean(conc_nmol_per_g, na.rm = TRUE),
+      NA_real_),
+    conc_nmol_per_g_native = ifelse(
+      any(!is.na(conc_nmol_per_g)) &
+        any(!is.na(frac_gluc)),
+      (1 - mean(frac_gluc, na.rm = TRUE)) *
+        mean(conc_nmol_per_g, na.rm = TRUE),
+      NA_real_)) %>%
+  mutate(key = paste0(soil, "_", treatment, "_", plfa))
+
+# There are still some NAs for the following three PLFAs
+
+plfas_to_exclude <- data_summ %>%
+  filter(is.na(conc_nmol_per_g)) %>%
+  distinct(plfa) %>%
+  pull(plfa)
+
+# · 16:1w5c: about 3 mol% of the PLFAs on average
+# · i14:0: about 1 mol% of the PLFAs on average
+# · i16:0: about 4 mol% of the PLFAs on average
+
+# As such, it is not really possible to reliably to include those PLFAs in
+# the sum of the PLFAs per microbial group, since the concentrations of these
+# PLFAs are unknown within some of the treatments.
+# Therefore, it would unfortunately be the safest to exclude these PLFAs
+# from the sum
+
+data_nmol_per_g_gapfilled <- plfa_split %>%
+  filter(batch == 3) %>%
+  # Exclude the PLFAs with NAs across replicates
+  filter(!plfa %in% plfas_to_exclude) %>%
+  mutate(key = paste0(soil, "_", treatment, "_", plfa)) %>%
+  left_join(data_summ %>%
+              rename(conc_avg = conc_nmol_per_g) %>%
+              rename(conc_avg_native = conc_nmol_per_g_native) %>%
+              select(key, conc_avg, conc_avg_native),
+            by = "key") %>%
+  select(-key) %>%
+  mutate(conc_nmol_per_g = coalesce(conc_nmol_per_g,
+                                    conc_avg),
+         conc_nmol_per_g_native = coalesce(
+           (1 - frac_gluc) * conc_nmol_per_g,
+           conc_avg_native))
+
+assertthat::assert_that(all(!is.na(data_nmol_per_g_gapfilled$conc_nmol_per_g)))
+assertthat::assert_that(
+  all(!is.na(data_nmol_per_g_gapfilled$conc_nmol_per_g_native)))
+
+
+
+data_graph <- data_nmol_per_g_gapfilled %>%
+  select(soil,
+         treatment,
+         replicate,
+         plfa,
+         group_tier1,
+         conc_nmol_per_g,
+         conc_nmol_per_g_native) %>%
+  filter(group_tier1 %in% c("gram-negative",
+                            "gram-positive",
+                            "fungi")) %>%
+  mutate(group = case_when(
+    group_tier1 %in% c("gram-negative", "gram-positive") ~ "bacteria",
+    group_tier1 %in% c("fungi") ~ "fungi")) %>%
+  select(-group_tier1) %>%
+  group_by(soil, treatment, replicate, group) %>%
+  summarise_per_group(variables_to_summarise = c("conc_nmol_per_g",
+                                                 "conc_nmol_per_g_native"),
+                      mode = "sum") %>%
+  mutate(
+    treatment_num = case_when(
+      treatment == "C" ~ 1,
+      treatment == "0" ~ 2,
+      treatment == "4" ~ 3,
+      treatment == "6" ~ 4),
+    treatment_name = case_when(
+      treatment == "C" ~ "**0** glucose   · **0** SMX",
+      treatment == "0" ~ "**0.5** glucose · **0** SMX",
+      treatment == "4" ~ "**0.5** glucose · **1** SMX",
+      treatment == "6" ~ "**0.5** glucose · **100** SMX"),
+    group_name = str_to_sentence(group),
+    group_col = case_when(
+      group == "fungi" ~ "#0043b6",
+      group == "bacteria" ~ "#D77C16"),
+    soil_name = case_when(
+      soil == "Grabenegg" ~ "**Cambisol** (Grabenegg)",
+      soil == "Seibersdorf" ~ "**Chernozem** (Seibersdorf)")
+  ) %>%
+  mutate(group_name = factor(group_name,
+                             levels = c("Bacteria",
+                                        "Fungi")))
+
+
+p <- ggplot() +
+  # Rep 1
+  geom_bar(data = data_graph %>%
+             filter(replicate == 1),
+           aes(x = treatment_num - 0.175,
+               y = conc_nmol_per_g,
+               fill = group_name),
+           stat = "identity",
+           position = "stack",
+           width = 0.3) +
+  geom_rect(data = data_graph %>%
+              filter(replicate == 1) %>%
+              filter(treatment != "C"),
+            aes(xmin = treatment_num - 0.175 - 0.14,
+                xmax = treatment_num - 0.175 + 0.14,
+                ymin = conc_nmol_per_g_native,
+                ymax = conc_nmol_per_g),
+            fill = NA,
+            linewidth = 0.7,
+            color = "black") +
+  # Rep 2
+  geom_bar(data = data_graph %>%
+             filter(replicate == 2),
+           aes(x = treatment_num + 0.175,
+               y = conc_nmol_per_g,
+               fill = group_name),
+           stat = "identity",
+           position = "stack",
+           width = 0.3) +
+  geom_rect(data = data_graph %>%
+              filter(replicate == 2) %>%
+              filter(treatment != "C"),
+            aes(xmin = treatment_num + 0.175 - 0.14,
+                xmax = treatment_num + 0.175 + 0.14,
+                ymin = conc_nmol_per_g_native,
+                ymax = conc_nmol_per_g),
+            fill = NA,
+            linewidth = 0.7,
+            color = "black") +
+  scale_x_continuous(breaks = unique(data_graph$treatment_num),
+                     labels = unique(data_graph$treatment_name)) +
+  scale_y_continuous(expand = expansion(add = c(0, 2))) +
+  scale_fill_manual(values = setNames(data_graph$group_col,
+                                      data_graph$group_name),
+                    guide = "none") +
+  labs(x = NULL,
+       tag = paste0("g **glucose**-C kg<sup>-1</sup><br>",
+                    "mg **SMX** kg<sup>-1</sup>"),
+       y = paste0("**Concentration of PLFAs** (nmol g<sup>-1</sup>)<br>",
+                  "(by microbial group and carbon source)")) +
+  facet_grid(soil_name ~ group_name) +
+  coord_flip() +
+  theme(axis.text.y = element_markdown(hjust = 0,
+                                       colour = "black",
+                                       size = 10,
+                                       margin = margin(r = 7)),
+        axis.ticks = element_blank(),
+        text = element_text(color = "black",
+                            size = 10),
+        axis.text.x = element_text(colour = "black",
+                                   size = 10,
+                                   margin = margin(b = 8,
+                                                   t = 6)),
+        axis.title.x = element_markdown(hjust = 1,
+                                        lineheight = 1.4,
+                                        colour = "black",
+                                        margin = margin(b = 0)),
+        plot.tag.position = c(0, 0.03),
+        plot.tag = element_markdown(hjust = 0,
+                                    lineheight = 1.4,
+                                    colour = "black",
+                                    size = 10,
+                                    margin = margin(b = 8)),
+        panel.spacing = unit(1, "lines"),
+        panel.grid.major.y = element_blank(),
+        panel.grid.major.x = element_line(linewidth = 1),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        # panel.grid.minor.x = element_line(linewidth = 1),
+        panel.background = element_rect(fill = "#D8E0E0"),
+        strip.background = element_blank(),
+        strip.text.x = element_markdown(hjust = 0,
+                                        colour = "black",
+                                        size = 10,
+                                        margin = margin(b = 8)),
+        strip.text.y = element_markdown(hjust = 0,
+                                        vjust = 1,
+                                        lineheight = 1.4,
+                                        colour = "black",
+                                        size = 10,
+                                        margin = margin(l = 10)),
+        plot.margin = margin(t = 0.5,
+                             r = 0.5,
+                             b = 0.5,
+                             l = 0.5,
+                             unit = "cm")) +
+  # True replicates
+  geom_segment(data = data.frame(soil_name = "**Chernozem** (Seibersdorf)",
+                                 group_name = as.factor("Fungi"),
+                                 height = 100),
+               aes(y = height, yend = height),
+               x = 3.55, xend = 4.45,
+               color = "black", linewidth = 0.7,
+               lineend = "butt") +
+  geom_segment(data = data.frame(soil_name = "**Chernozem** (Seibersdorf)",
+                                 group_name = as.factor("Fungi"),
+                                 height = 100),
+               aes(y = height + 1, yend = height - 10),
+               x = 3.55, xend = 3.55,
+               color = "black", linewidth = 0.7,
+               lineend = "butt") +
+  geom_segment(data = data.frame(soil_name = "**Chernozem** (Seibersdorf)",
+                                 group_name = as.factor("Fungi"),
+                                 height = 100),
+               aes(y = height + 1, yend = height - 10),
+               x = 4.45, xend = 4.45,
+               color = "black", linewidth = 0.7,
+               lineend = "butt") +
+  geom_richtext(data = data.frame(soil_name = "**Chernozem** (Seibersdorf)",
+                                  group_name = as.factor("Fungi"),
+                                  label = paste0("Analytical replicates<br>",
+                                                 "(in one true replicate)")),
+                aes(y = 110, x = 4, label = label),
+                angle = 0,
+                fill = NA, label.color = NA, size = 3,
+                color = "black", hjust = 0, vjust = 0.55) +
+  # PLFAs derived from glucose
+  geom_richtext(data = data.frame(soil_name = "**Cambisol** (Grabenegg)",
+                                  group_name = as.factor("Fungi"),
+                                  label =
+                                    "PLFAs<br>from<br>**glucose**"),
+                aes(y = 100, x = 3.2, label = label),
+                angle = 0,
+                fill = NA, label.color = NA, label.size = 0.7,
+                size = 3,
+                color = "black", hjust = 0, vjust = 0.7) +
+  geom_rect(data = data.frame(soil_name = "**Cambisol** (Grabenegg)",
+                              group_name = as.factor("Fungi")),
+            aes(xmin = 2.35,
+                xmax = 3.6,
+                ymin = 90,
+                ymax = 210),
+            fill = NA,
+            linewidth = 0.7,
+            color = "black") +
+  geom_curve(
+    data = data.frame(soil_name = "**Cambisol** (Grabenegg)",
+                      group_name = as.factor("Fungi")),
+    aes(x = 4.2, y = 40, xend = 3.8, yend = 140),
+    stat = "unique", curvature = -0.5, linewidth = 0.7,
+    arrow = arrow(angle = 20, length = unit(1, "mm"))) +
+  # PLFAs derived from SOC
+  geom_richtext(data = data.frame(soil_name = "**Cambisol** (Grabenegg)",
+                                  group_name = as.factor("Fungi"),
+                                  label =
+                                    "PLFAs<br>from<br>**SOC**"),
+                aes(y = 100, x = 1.5, label = label),
+                angle = 0,
+                fill = NA, label.color = NA, label.size = 0.6,
+                size = 3,
+                color = "black", hjust = 0, vjust = 0.5) +
+  geom_curve(
+    data = data.frame(soil_name = "**Cambisol** (Grabenegg)",
+                      group_name = as.factor("Fungi")),
+    aes(x = 1.7, y = 15, xend = 1.5, yend = 90),
+    stat = "unique", curvature = 0.4, linewidth = 0.7,
+    arrow = arrow(angle = 20, length = unit(1, "mm")))
+
+
+ggsave(filename = "contrib_gluc_by_group_bact_fungi_abs.png",
+       path = "./output/figures/",
+       plot = p,
+       dpi = 500,
+       height = 5,
+       width = 6.81)
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Per group: Percentage extra SOC-derived ----
+
+
+group_list <- plfa_summ_sample_group %>%
+  distinct(group_tier1) %>%
+  pull(group_tier1)
+
+for (group_i in group_list) {
+
+  data_graph <- plfa_summ_sample_group %>%
+    select(soil,
+           treatment,
+           batch,
+           group_tier1,
+           conc_native_perc_extra,
+           conc_native_perc_extra_min,
+           conc_native_perc_extra_max) %>%
+    filter(group_tier1 == group_i) %>%
+    filter(treatment != "C") %>%
+    mutate(
+      treatment_num = case_when(
+        treatment == "0" ~ 1,
+        treatment == "4" ~ 2,
+        treatment == "6" ~ 3),
+      treatment_name = case_when(
+        treatment == "0" ~ "**0.5** glucose · **0** SMX",
+        treatment == "4" ~ "**0.5** glucose · **1** SMX",
+        treatment == "6" ~ "**0.5** glucose · **100** SMX"),
+      soil_name = case_when(
+        soil == "Grabenegg" ~ "**Cambisol** (Grabenegg)",
+        soil == "Seibersdorf" ~ "**Chernozem** (Seibersdorf)")) %>%
+    arrange(soil,
+            treatment_num)
+
+
+
+  p <- ggplot(data = data_graph,
+              aes(x = treatment_num,
+                  y = conc_native_perc_extra)) +
+    geom_hline(yintercept = 0,
+               col = "black",
+               linewidth = 1,
+               linetype = "solid") +
+    geom_point(col = "darkorange",
+               fill = "darkorange",
+               alpha = 0.5,
+               size = 3,
+               stroke = 1) +
+    geom_point(col = "darkorange",
+               shape = 21,
+               size = 3,
+               stroke = 1) +
+    scale_x_continuous(breaks = unique(data_graph$treatment_num),
+                       labels = unique(data_graph$treatment_name),
+                       expand = c(0.1, 0.1)) +
+    facet_wrap(~soil_name, ncol = 1) +
+    labs(x = NULL,
+         tag = paste0("g **glucose**-C kg<sup>-1</sup><br>",
+                      "mg **SMX** kg<sup>-1</sup>"),
+         y = paste0("**", str_to_sentence(group_i),
+                    "**<br>(% extra SOC-derived relative to ",
+                    "0 g glucose-C kg<sup>-1</sup>)")) +
+    coord_flip() +
+    theme(axis.text.y = element_markdown(hjust = 0,
+                                         colour = "black",
+                                         size = 10,
+                                         margin = margin(r = 10)),
+          axis.ticks = element_blank(),
+          text = element_text(color = "black",
+                              size = 10),
+          axis.text.x = element_text(colour = "black",
+                                     size = 10,
+                                     margin = margin(b = 8,
+                                                     t = 6)),
+          axis.title.x = element_markdown(hjust = 1,
+                                          lineheight = 1.4,
+                                          colour = "black",
+                                          margin = margin(b = 8)),
+          plot.tag.position = c(0, 0.06),
+          plot.tag = element_markdown(hjust = 0,
+                                      lineheight = 1.4,
+                                      colour = "black",
+                                      size = 10,
+                                      margin = margin(b = 8)),
+          panel.spacing = unit(1, "lines"),
+          panel.grid.major.y = element_blank(),
+          panel.grid.major.x = element_line(linewidth = 1),
+          panel.grid.minor.y = element_blank(),
+          panel.grid.minor.x = element_line(linewidth = 1),
+          panel.background = element_rect(fill = "#D8E0E0"),
+          strip.background = element_blank(),
+          strip.text = element_markdown(hjust = 0,
+                                        colour = "black",
+                                        size = 10,
+                                        margin = margin(b = 8)),
+          legend.position = "bottom",
+          legend.title = element_blank(),
+          legend.key.size = unit(0.6, "line"),
+          legend.key = element_rect(fill = NA),
+          legend.margin = margin(t = 0, r = 0, b = 0, l = 8),
+          legend.text = element_text(margin = margin(l = 5,
+                                                     r = 10),
+                                     size = 10,
+                                     vjust = 0.7),
+          # aspect.ratio = 0.5,
+          plot.margin = margin(t = 0.5,
+                               r = 0.5,
+                               b = 0.5,
+                               l = 0.5,
+                               unit = "cm"))
+
+
+  ggsave(filename = paste0("group_perc_extra_from_soc/",
+                           gsub(":", "", group_i), ".png"),
+         path = "./output/figures/",
+         plot = p,
+         dpi = 500,
+         height = 4.2,
+         width = 6.81)
+
+}
+
+
+
+
+
+
+
+
 
 
 
@@ -3439,7 +4250,7 @@ for (plfa_i in plfa_list) {
 
 
 
-## Percentage extra SOC-derived ----
+## Per PLFA: Percentage extra SOC-derived ----
 
 
 plfa_list <- plfa_molecular_data %>%
@@ -3633,8 +4444,8 @@ pca_samples <- cbind(
       treatment == "4" ~ "**0.5** glucose · **1** SMX",
       treatment == "6" ~ "**0.5** glucose · **100** SMX"),
     soil_name = case_when(
-      soil == "Grabenegg" ~ "**Cambisol** (Grabenegg)",
-      soil == "Seibersdorf" ~ "**Chernozem** (Seibersdorf)"))
+      soil == "Grabenegg" ~ "Cambisol<br>(Grabenegg)",
+      soil == "Seibersdorf" ~ "Chernozem<br>(Seibersdorf)"))
 
 
 # Scores on first two PCA axes from the variables (PLFAs)
@@ -3685,10 +4496,12 @@ p1 <- ggplot() +
              size = 2,
              stroke = 2,
              alpha = 0.8,
-             aes(x = pc1, y = pc2, col = treatment_name, shape = soil)) +
+             aes(x = pc1, y = pc2, col = treatment_name,
+                 shape = soil_name)) +
   scale_color_manual(values = setNames(pca_samples$treatment_col,
                                        pca_samples$treatment_name)) +
-  scale_shape_manual(values = c("Grabenegg" = 4, "Seibersdorf" = 16)) +
+  scale_shape_manual(values = c("Cambisol<br>(Grabenegg)" = 4,
+                                "Chernozem<br>(Seibersdorf)" = 16)) +
   coord_cartesian(xlim = c(-3, 3),
                   ylim = c(-3, 3),
                   expand = FALSE) +
@@ -3710,7 +4523,8 @@ p1 <- ggplot() +
                               override.aes = list(alpha = 1,
                                                   size = 1)),
          shape = guide_legend(order = 2,
-                              override.aes = list(alpha = 1))) +
+                              override.aes = list(alpha = 1),
+                              keyheight = unit(2, "lines"))) +
   theme(axis.line = element_line(linewidth = 0.7, colour = "black"),
         axis.ticks = element_line(linewidth = 0.7, colour = "black"),
         axis.ticks.length = unit(-0.25, "cm"),
@@ -3765,9 +4579,10 @@ p2 <- ggplot() +
              size = 2,
              stroke = 2,
              col = "lightgrey",
-             aes(x = pc1, y = pc2, shape = soil),
+             aes(x = pc1, y = pc2, shape = soil_name),
              show.legend = FALSE) +
-  scale_shape_manual(values = c("Grabenegg" = 4, "Seibersdorf" = 16)) +
+  scale_shape_manual(values = c("Cambisol<br>(Grabenegg)" = 4,
+                                "Chernozem<br>(Seibersdorf)" = 16)) +
   geom_segment(data = pca_plfas,
                aes(x = 0, y = 0, xend = pc1, yend = pc2,
                    col = group_name),
@@ -3934,8 +4749,8 @@ pca_samples <- cbind(
       treatment == "4" ~ "**0.5** glucose · **1** SMX",
       treatment == "6" ~ "**0.5** glucose · **100** SMX"),
     soil_name = case_when(
-      soil == "Grabenegg" ~ "**Cambisol** (Grabenegg)",
-      soil == "Seibersdorf" ~ "**Chernozem** (Seibersdorf)"))
+      soil == "Grabenegg" ~ "Cambisol<br>(Grabenegg)",
+      soil == "Seibersdorf" ~ "Chernozem<br>(Seibersdorf)"))
 
 
 # Scores on first two PCA axes from the variables (PLFAs)
@@ -3986,10 +4801,12 @@ p1 <- ggplot() +
              size = 2,
              stroke = 2,
              alpha = 0.8,
-             aes(x = pc1, y = pc2, col = treatment_name, shape = soil)) +
+             aes(x = pc1, y = pc2, col = treatment_name,
+                 shape = soil_name)) +
   scale_color_manual(values = setNames(pca_samples$treatment_col,
                                        pca_samples$treatment_name)) +
-  scale_shape_manual(values = c("Grabenegg" = 4, "Seibersdorf" = 16)) +
+  scale_shape_manual(values = c("Cambisol<br>(Grabenegg)" = 4,
+                                "Chernozem<br>(Seibersdorf)" = 16)) +
   coord_cartesian(xlim = c(-8, 8),
                   ylim = c(-8, 8),
                   expand = FALSE) +
@@ -4003,13 +4820,16 @@ p1 <- ggplot() +
                     summary(pca_result)$cont$importance)[2, 2],
                         1),
                   " %)"),
-       shape = "Soil",
-       color = "Treatment") +
+       shape = "**Soil**",
+       color = paste0("**Treatment**<br>",
+                      "g glucose-C kg<sup>-1</sup> · ",
+                      "mg SMX kg<sup>-1</sup>")) +
   guides(color = guide_legend(order = 1,
                               override.aes = list(alpha = 1,
                                                   size = 1)),
          shape = guide_legend(order = 2,
-                              override.aes = list(alpha = 1))) +
+                              override.aes = list(alpha = 1),
+                              keyheight = unit(2, "lines"))) +
   theme(axis.line = element_line(linewidth = 0.7, colour = "black"),
         axis.ticks = element_line(linewidth = 0.7, colour = "black"),
         axis.ticks.length = unit(-0.25, "cm"),
@@ -4035,7 +4855,8 @@ p1 <- ggplot() +
                                         margin = margin(r = 10)),
         legend.text = element_markdown(lineheight = 1.2,
                                        size = 10),
-        legend.title = element_text(face = "bold"),
+        legend.title = element_markdown(lineheight = 1.3,
+                                        size = 10),
         legend.justification = c("left", "top"),
         panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
@@ -4063,9 +4884,10 @@ p2 <- ggplot() +
              size = 2,
              stroke = 2,
              col = "lightgrey",
-             aes(x = pc1, y = pc2, shape = soil),
+             aes(x = pc1, y = pc2, shape = soil_name),
              show.legend = FALSE) +
-  scale_shape_manual(values = c("Grabenegg" = 4, "Seibersdorf" = 16)) +
+  scale_shape_manual(values = c("Cambisol<br>(Grabenegg)" = 4,
+                                "Chernozem<br>(Seibersdorf)" = 16)) +
   geom_segment(data = pca_plfas,
                aes(x = 0, y = 0, xend = pc1, yend = pc2,
                    col = group_name),
@@ -4098,7 +4920,7 @@ p2 <- ggplot() +
                     summary(pca_result)$cont$importance)[2, 2],
                         1),
                   " %)"),
-       color = "Microbial group") +
+       color = "**Microbial group**") +
   guides(color = guide_legend(order = 1,
                               override.aes = list(alpha = 1,
                                                   size = 1)),
@@ -4129,7 +4951,8 @@ p2 <- ggplot() +
                                         margin = margin(r = 10)),
         legend.text = element_markdown(lineheight = 1.2,
                                        size = 10),
-        legend.title = element_text(face = "bold"),
+        legend.title = element_markdown(lineheight = 1.3,
+                                        size = 10),
         legend.justification = c("left", "top"),
         panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
@@ -4168,7 +4991,7 @@ ggsave(filename = "pca_abs.png",
        path = "./output/figures/",
        plot = p,
        dpi = 500,
-       height = 5,
+       height = 5.6,
        width = 6.81)
 
 
@@ -4277,8 +5100,8 @@ pca_samples <- cbind(
       treatment == "4" ~ "**0.5** glucose · **1** SMX",
       treatment == "6" ~ "**0.5** glucose · **100** SMX"),
     soil_name = case_when(
-      soil == "Grabenegg" ~ "**Cambisol** (Grabenegg)",
-      soil == "Seibersdorf" ~ "**Chernozem** (Seibersdorf)"))
+      soil == "Grabenegg" ~ "Cambisol<br>(Grabenegg)",
+      soil == "Seibersdorf" ~ "Chernozem<br>(Seibersdorf)"))
 
 
 # Scores on first two PCA axes from the variables (PLFAs)
@@ -4336,21 +5159,23 @@ p1 <- ggplot() +
              size = 2,
              stroke = 2,
              alpha = 0.8,
-             aes(x = pc1, y = pc2, col = treatment_name, shape = soil)) +
+             aes(x = pc1, y = pc2, col = treatment_name,
+                 shape = soil_name)) +
   scale_color_manual(values = setNames(pca_samples$treatment_col,
                                        pca_samples$treatment_name)) +
-  scale_shape_manual(values = c("Grabenegg" = 4, "Seibersdorf" = 16)) +
+  scale_shape_manual(values = c("Cambisol<br>(Grabenegg)" = 4,
+                                "Chernozem<br>(Seibersdorf)" = 16)) +
   coord_cartesian(xlim = c(-4, 2),
                   ylim = c(-2, 3),
                   expand = FALSE) +
   labs(x = paste0("**PC1** (",
-                  round(100 *
-                      as.data.frame(summary(pca_result)$cont$importance)[2, 1],
+                  round(100 * as.data.frame(
+                    summary(pca_result)$cont$importance)[2, 1],
                         1),
                   " %)"),
        y = paste0("**PC2**<br>(",
-                  round(100 *
-                          as.data.frame(summary(pca_result)$cont$importance)[2, 2],
+                  round(100 * as.data.frame(
+                    summary(pca_result)$cont$importance)[2, 2],
                         1),
                   " %)"),
        shape = "Soil",
@@ -4359,7 +5184,8 @@ p1 <- ggplot() +
                               override.aes = list(alpha = 1,
                                                   size = 1)),
          shape = guide_legend(order = 2,
-                              override.aes = list(alpha = 1))) +
+                              override.aes = list(alpha = 1),
+                              keyheight = unit(2, "lines"))) +
   theme(axis.line = element_line(linewidth = 0.7, colour = "black"),
         axis.ticks = element_line(linewidth = 0.7, colour = "black"),
         axis.ticks.length = unit(-0.25, "cm"),
@@ -4405,9 +5231,10 @@ p2 <- ggplot() +
              size = 2,
              stroke = 2,
              col = "lightgrey",
-             aes(x = pc1, y = pc2, shape = soil),
+             aes(x = pc1, y = pc2, shape = soil_name),
              show.legend = FALSE) +
-  scale_shape_manual(values = c("Grabenegg" = 4, "Seibersdorf" = 16)) +
+  scale_shape_manual(values = c("Cambisol<br>(Grabenegg)" = 4,
+                                "Chernozem<br>(Seibersdorf)" = 16)) +
   geom_segment(data = pca_plfas,
                aes(x = 0, y = 0, xend = pc1, yend = pc2,
                    col = group_name),
@@ -4431,13 +5258,13 @@ p2 <- ggplot() +
                   ylim = c(-2, 3),
                   expand = FALSE) +
   labs(x = paste0("**PC1** (",
-                  round(100 *
-                          as.data.frame(summary(pca_result)$cont$importance)[2, 1],
+                  round(100 * as.data.frame(
+                    summary(pca_result)$cont$importance)[2, 1],
                         1),
                   " %)"),
        y = paste0("**PC2**<br>(",
-                  round(100 *
-                          as.data.frame(summary(pca_result)$cont$importance)[2, 2],
+                  round(100 * as.data.frame(
+                    summary(pca_result)$cont$importance)[2, 2],
                         1),
                   " %)"),
        color = "Microbial group") +
@@ -4855,6 +5682,316 @@ plot(cca_result)
 
 
 
+
+
+
+
+
+
+## Correlation atom % PLFAs versus CO2 flux (day 29) versus SOC ----
+
+# Atom % of PLFAs (all extracted PLFAs of the microbial community together)
+# (day 29)
+
+atom_perc_all_plfas <- plfa_summ_gapfilled %>%
+  filter(!plfa %in% c("13:0", "19:0")) %>%
+  group_by(sample, soil, glucose_g_c_per_kg, smx_mg_per_kg,
+           log_smx, batch, treatment_per_soil, treatment) %>%
+  reframe(
+    atom_perc_plfas_min = ifelse(
+      any(!is.na(atom_perc)),
+      min(atom_perc_min, na.rm = TRUE),
+      NA_real_),
+    atom_perc_plfas_max = ifelse(
+      any(!is.na(atom_perc)),
+      max(atom_perc_max, na.rm = TRUE),
+      NA_real_),
+    atom_perc_plfas = ifelse(
+      any(!is.na(atom_perc)),
+      weighted.mean(atom_perc,
+                    w = conc_relative[which(!is.na(atom_perc))],
+                    na.rm = TRUE),
+      NA_real_)) %>%
+  ungroup()
+
+
+# Atom % of CO2 flux (day 29)
+
+atom_perc_co2 <-
+  openxlsx::read.xlsx(paste0("data/raw_data/Results CRDS - SMX - uptodate",
+                             ".xlsx"),
+                      startRow = 8,
+                      sheet = 10)[1:12, ] %>%
+  mutate(days_incub = as.numeric(X1)) %>%
+  # Day 29
+  filter(days_incub > 28) %>%
+  select(-days_incub, -X1) %>%
+  pivot_longer(cols = everything(),
+               names_to = "sample",
+               values_to = "atom_perc_co2") %>%
+  mutate(atom_perc_co2 = as.numeric(atom_perc_co2)) %>%
+  left_join(treatments %>%
+              select(-sample_collection),
+            by = "sample") %>%
+  filter(
+    # Only batch 2
+    grepl("-4|-5|-6", sample) |
+           smx_mg_per_kg %in% c(1, 100)) %>%
+  mutate(sample = gsub("-4", "-1", sample)) %>%
+  mutate(sample = gsub("-5", "-2", sample)) %>%
+  mutate(sample = gsub("-6", "-3", sample))
+
+
+
+
+# Atom % of SOC (day 29)
+
+atom_perc_soc <- bind_rows(
+    # Seibersdorf
+    openxlsx::read.xlsx(paste0("data/raw_data/Batch-1611 AMR raw.xlsx"),
+                        startRow = 2,
+                        cols = 1:10,
+                        sheet = 1) %>%
+      rename(sample = "Sample.label") %>%
+      rename(d13c_permille = "δ.13C.OC") %>%
+      rename(soil = "Soil") %>%
+      filter(soil %in% c("Seibersdorf")) %>%
+      filter(!sample %in% c("S-1", "S-2", "S-3")) %>%
+      mutate(d13c_permille = as.numeric(d13c_permille)) %>%
+      select(soil, sample, d13c_permille),
+    # Grabenegg
+    openxlsx::read.xlsx(paste0("data/raw_data/Batch-1611 AMR raw.xlsx"),
+                        startRow = 45,
+                        cols = 1:8,
+                        sheet = 1) %>%
+      rename(sample = "Sample.label") %>%
+      rename(d13c_permille = "δ.13C") %>%
+      rename(soil = "Soil") %>%
+      filter(soil %in% c("Grabenegg")) %>%
+      filter(!sample %in% c("G-1", "G-2", "G-3")) %>%
+      mutate(d13c_permille = as.numeric(d13c_permille)) %>%
+      select(soil, sample, d13c_permille)) %>%
+  left_join(treatments %>%
+              select(-sample_collection, -soil),
+            by = "sample") %>%
+  filter(
+    # Only batch 2
+    grepl("-4|-5|-6", sample) |
+      smx_mg_per_kg %in% c(1, 100)) %>%
+  mutate(sample = gsub("-4", "-1", sample)) %>%
+  mutate(sample = gsub("-5", "-2", sample)) %>%
+  mutate(sample = gsub("-6", "-3", sample)) %>%
+  # Convert to atom%
+  mutate(
+    atom_perc_soc = (100 * isotope_ratio_pdb * (d13c_permille / 1000 + 1)) /
+      (1 + isotope_ratio_pdb * (d13c_permille / 1000 + 1)))
+
+
+
+
+df_graph <- atom_perc_all_plfas %>%
+  left_join(atom_perc_co2 %>%
+              select(sample, atom_perc_co2),
+            by = "sample") %>%
+  left_join(atom_perc_soc %>%
+              select(sample, atom_perc_soc),
+            by = "sample") %>%
+  mutate(
+    treatment_num = case_when(
+      treatment == "C" ~ 1,
+      treatment == "0" ~ 2,
+      treatment == "4" ~ 3,
+      treatment == "6" ~ 4),
+    treatment_col = case_when(
+      treatment == "C" ~ "#CC3300",
+      treatment == "0" ~ "#AADC32",
+      treatment == "4" ~ "#2C728E",
+      treatment == "6" ~ "#472D7B"),
+    treatment_name = case_when(
+      treatment == "C" ~ "**0** glucose   · **0** SMX",
+      treatment == "0" ~ "**0.5** glucose · **0** SMX",
+      treatment == "4" ~ "**0.5** glucose · **1** SMX",
+      treatment == "6" ~ "**0.5** glucose · **100** SMX"),
+    soil_name = case_when(
+      soil == "Grabenegg" ~ "Cambisol<br>(Grabenegg)",
+      soil == "Seibersdorf" ~ "Chernozem<br>(Seibersdorf)"))
+
+
+### Graph ----
+
+p1 <- ggplot() +
+  geom_segment(
+    data = data.frame(start = 1.06),
+    aes(y = start, yend = start + .12,
+        x = start, xend = start + .12),
+    color = "black", linewidth = 0.7,
+    lineend = "butt") +
+  geom_point(data = df_graph %>%
+               filter(!is.na(atom_perc_plfas) &
+                        !is.na(atom_perc_co2)),
+             size = 2,
+             stroke = 2,
+             alpha = 0.8,
+             aes(x = atom_perc_plfas,
+                 y = atom_perc_co2,
+                 col = treatment_name,
+                 shape = soil_name)) +
+  scale_color_manual(values = setNames(df_graph$treatment_col,
+                                       df_graph$treatment_name)) +
+  scale_shape_manual(values = c("Cambisol<br>(Grabenegg)" = 4,
+                                "Chernozem<br>(Seibersdorf)" = 16)) +
+  coord_cartesian(xlim = c(1.06, 1.1801),
+                  ylim = c(1.06, 1.1801),
+                  expand = FALSE) +
+  labs(x = "% <sup>13</sup>C of **all PLFAs** (day 29)",
+       y = "% <sup>13</sup>C of<br>**CO<sub>2</sub> flux**<br>(day 29)",
+       shape = "**Soil**",
+       color = paste0("**Treatment**<br>",
+                      "g glucose-C kg<sup>-1</sup> · ",
+                      "mg SMX kg<sup>-1</sup>")) +
+  guides(color = guide_legend(order = 1,
+                              override.aes = list(alpha = 1,
+                                                  size = 1)),
+         shape = guide_legend(order = 2,
+                              override.aes = list(alpha = 1),
+                              keyheight = unit(2, "lines"))) +
+  theme(axis.line = element_line(linewidth = 0.7, colour = "black"),
+        axis.ticks = element_line(linewidth = 0.7, colour = "black"),
+        axis.ticks.length = unit(-0.25, "cm"),
+        text = element_text(color = "black",
+                            size = 10),
+        axis.text.x = element_text(colour = "black",
+                                   size = 10,
+                                   margin = margin(b = 8,
+                                                   t = 8)),
+        axis.text.y = element_markdown(hjust = 0,
+                                       colour = "black",
+                                       size = 10,
+                                       margin = margin(r = 5)),
+        axis.title.x = element_markdown(hjust = 1.02,
+                                        lineheight = 1.4,
+                                        colour = "black",
+                                        margin = margin(b = 0)),
+        axis.title.y = element_markdown(hjust = 1,
+                                        vjust = 1.02,
+                                        angle = 0,
+                                        lineheight = 1.4,
+                                        colour = "black",
+                                        margin = margin(r = 10)),
+        legend.text = element_markdown(lineheight = 1.2,
+                                       size = 10),
+        legend.title = element_markdown(lineheight = 1.3,
+                                        size = 10),
+        legend.justification = c("left", "top"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        plot.margin = margin(t = 0.5,
+                             r = 0.5,
+                             b = 0.5,
+                             l = 0.3,
+                             unit = "cm"),
+        aspect.ratio = 1)
+
+ggsave(filename = "atom_perc_comparison_plfa_co2.png",
+       path = "./output/figures/",
+       plot = p1,
+       dpi = 500,
+       height = 3.5,
+       width = 6.81)
+
+
+
+
+p2 <- ggplot() +
+  geom_segment(
+    data = data.frame(start = 1.06),
+    aes(y = start, yend = start + .12,
+        x = start, xend = start + .12),
+    color = "black", linewidth = 0.7,
+    lineend = "butt") +
+  geom_point(data = df_graph %>%
+               filter(!is.na(atom_perc_plfas) &
+                        !is.na(atom_perc_soc)),
+             size = 2,
+             stroke = 2,
+             alpha = 0.8,
+             aes(x = atom_perc_plfas,
+                 y = atom_perc_soc,
+                 col = treatment_name,
+                 shape = soil_name)) +
+  scale_color_manual(values = setNames(df_graph$treatment_col,
+                                       df_graph$treatment_name)) +
+  scale_shape_manual(values = c("Cambisol<br>(Grabenegg)" = 4,
+                                "Chernozem<br>(Seibersdorf)" = 16)) +
+  coord_cartesian(xlim = c(1.06, 1.1801),
+                  ylim = c(1.06, 1.1801),
+                  expand = FALSE) +
+  labs(x = "% <sup>13</sup>C of **all PLFAs** (day 29)",
+       y = "% <sup>13</sup>C of<br>**soil organic C**<br>(day 29)",
+       shape = "**Soil**",
+       color = paste0("**Treatment**<br>",
+                      "g glucose-C kg<sup>-1</sup> · ",
+                      "mg SMX kg<sup>-1</sup>")) +
+  guides(color = guide_legend(order = 1,
+                              override.aes = list(alpha = 1,
+                                                  size = 1)),
+         shape = guide_legend(order = 2,
+                              override.aes = list(alpha = 1),
+                              keyheight = unit(2, "lines"))) +
+  theme(axis.line = element_line(linewidth = 0.7, colour = "black"),
+        axis.ticks = element_line(linewidth = 0.7, colour = "black"),
+        axis.ticks.length = unit(-0.25, "cm"),
+        text = element_text(color = "black",
+                            size = 10),
+        axis.text.x = element_text(colour = "black",
+                                   size = 10,
+                                   margin = margin(b = 8,
+                                                   t = 8)),
+        axis.text.y = element_markdown(hjust = 0,
+                                       colour = "black",
+                                       size = 10,
+                                       margin = margin(r = 5)),
+        axis.title.x = element_markdown(hjust = 1.02,
+                                        lineheight = 1.4,
+                                        colour = "black",
+                                        margin = margin(b = 0)),
+        axis.title.y = element_markdown(hjust = 1,
+                                        vjust = 1.02,
+                                        angle = 0,
+                                        lineheight = 1.4,
+                                        colour = "black",
+                                        margin = margin(r = 10)),
+        legend.text = element_markdown(lineheight = 1.2,
+                                       size = 10),
+        legend.title = element_markdown(lineheight = 1.3,
+                                        size = 10),
+        legend.justification = c("left", "top"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        plot.margin = margin(t = 0.5,
+                             r = 0.5,
+                             b = 0.5,
+                             l = 0.3,
+                             unit = "cm"),
+        aspect.ratio = 1)
+
+
+
+
+p <- p1 + p2 +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom",
+        legend.direction = "vertical",
+        legend.justification = c("left", "top"))
+
+ggsave(filename = "atom_perc_comparison.png",
+       path = "./output/figures/",
+       plot = p,
+       dpi = 500,
+       height = 5.5,
+       width = 6.81)
 
 
 
